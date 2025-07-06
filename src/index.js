@@ -6,6 +6,7 @@ import { generateAIReviewScript } from './openai-script-generator.js';
 import { createSlideshow } from './video-creator.js';
 import { createThumbnail } from './thumbnail-generator.js';
 import { uploadToYouTube } from './youtube-publisher.js';
+import { PromotionManager } from './promotion-manager.js';
 import fs from 'fs/promises';
 
 /**
@@ -17,7 +18,9 @@ const DEFAULT_OPTIONS = {
   outputDir: './output',
   videoQuality: 'medium',
   cleanup: true,
-  onProgress: null
+  onProgress: null,
+  autoPromote: false,
+  promotionPlatforms: ['reddit', 'pinterest', 'twitter']
 };
 
 /**
@@ -382,6 +385,67 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
       timings.youtubeUpload.end = Date.now();
       console.log(`✅ Video uploaded to YouTube: ${uploadResult.url}`);
       
+      // Step 9: Promote video (if enabled)
+      let promotionResults = null;
+      if (config.autoPromote) {
+        const shouldPromote = await promptUserConfirmation(
+          '\n📢 Do you want to promote this video on social media now?',
+          config.autoPromote
+        );
+        
+        if (shouldPromote) {
+          reportProgress(config.onProgress, 'promotion', 95, 'Promoting video on social media');
+          timings.promotion = { start: Date.now() };
+          
+          try {
+            console.log('\n🚀 Starting social media promotion...');
+            
+            const promotionManager = new PromotionManager({
+              headless: config.headless || true,
+              enabledPlatforms: config.promotionPlatforms
+            });
+            
+            // Extract tags from product data for better targeting
+            const tags = [
+              ...productData.title.toLowerCase().split(' ').filter(word => word.length > 3),
+              'review', 'amazon', 'product'
+            ].slice(0, 10);
+            
+            const promotionData = {
+              title: videoTitle,
+              url: uploadResult.url,
+              description: videoDescription,
+              tags,
+              thumbnailPath: finalThumbnailPath
+            };
+            
+            promotionResults = await promotionManager.promoteVideo(promotionData);
+            
+            timings.promotion.end = Date.now();
+            
+            const successfulPromotions = promotionResults.filter(r => r.success).length;
+            console.log(`✅ Promotion completed: ${successfulPromotions}/${promotionResults.length} platforms successful`);
+            
+            // Display promotion results
+            promotionResults.forEach(result => {
+              if (result.success) {
+                console.log(`   ✅ ${result.platform.toUpperCase()}: Promoted successfully`);
+              } else {
+                console.log(`   ❌ ${result.platform.toUpperCase()}: ${result.error}`);
+              }
+            });
+            
+          } catch (error) {
+            console.warn(`⚠️ Promotion failed: ${error.message}`);
+            console.log('📹 Video was uploaded successfully, but promotion encountered issues');
+            timings.promotion = { start: timings.promotion.start, end: Date.now() };
+          }
+        } else {
+          console.log('\n⏸️ Promotion skipped by user choice');
+          console.log('💡 You can promote your video later using: node src/promotion-cli.js promote');
+        }
+      }
+      
       // Return success result with YouTube URL
       const successResult = {
         success: true,
@@ -390,6 +454,7 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
         productTitle: productData.title,
         videoTitle,
         timing: createTimingInfo(timings),
+        promotionResults,
         files: {
           images: imagePaths,
           voiceover: voiceoverPath,
@@ -495,10 +560,13 @@ Options:
   --output-dir <path>       Output directory (default: ./output)
   --no-cleanup             Don't cleanup temporary files
   --auto-upload            Automatically upload to YouTube without confirmation
+  --auto-promote           Automatically promote video on social media after upload
+  --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter)
 
 Example:
   node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --quality high --max-images 3
-  node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --auto-upload
+  node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --auto-upload --auto-promote
+  node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --promotion-platforms "reddit,twitter"
     `);
     process.exit(1);
   }
@@ -531,6 +599,13 @@ Example:
       case '--auto-upload':
         options.autoUpload = true;
         i--; // No value for this flag
+        break;
+      case '--auto-promote':
+        options.autoPromote = true;
+        i--; // No value for this flag
+        break;
+      case '--promotion-platforms':
+        options.promotionPlatforms = value ? value.split(',').map(p => p.trim()) : [];
         break;
     }
   }

@@ -8,6 +8,11 @@
     "start": "node src/index.js",
     "test": "mocha test/**/*.test.js --timeout 30000",
     "test:watch": "mocha test/**/*.test.js --watch --timeout 30000",
+    "test:promotion": "node test-promotion.js",
+    "promote": "node src/promotion-cli.js",
+    "promote:test": "node src/promotion-cli.js test",
+    "promote:stats": "node src/promotion-cli.js stats",
+    "promote:history": "node src/promotion-cli.js history",
     "lint": "eslint src/ test/",
     "lint:fix": "eslint src/ test/ --fix",
     "format": "prettier --write src/ test/",
@@ -28,12 +33,16 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "cheerio": "^1.1.0",
     "dotenv": "^16.3.1",
     "fluent-ffmpeg": "^2.1.2",
     "googleapis": "^131.0.0",
+    "node-cron": "^4.2.0",
     "node-fetch": "^3.3.2",
     "openai": "^5.8.2",
-    "puppeteer": "^21.11.0"
+    "puppeteer": "^21.11.0",
+    "sharp": "^0.34.2",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "chai": "^4.3.10",
