@@ -314,6 +314,7 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
     timings.thumbnailCreation = { start: Date.now() };
     
     const thumbnailPath = `${config.outputDir}/${safeFilename}-thumbnail.jpg`;
+    const promotionThumbnailPath = `${config.outputDir}/${safeFilename}.png`;
     let finalThumbnailPath = null;
     
     try {
@@ -321,6 +322,22 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
         productData,
         thumbnailPath
       );
+      
+      // Also save a PNG version for promotions (Pinterest works better with PNG)
+      if (finalThumbnailPath) {
+        try {
+          // Import sharp for image conversion
+          const sharp = (await import('sharp')).default;
+          
+          await sharp(finalThumbnailPath)
+            .png()
+            .toFile(promotionThumbnailPath);
+          
+          console.log(`✅ Promotion thumbnail created: ${promotionThumbnailPath}`);
+        } catch (conversionError) {
+          console.warn(`⚠️ Failed to create PNG thumbnail for promotions: ${conversionError.message}`);
+        }
+      }
       
       timings.thumbnailCreation.end = Date.now();
       console.log(`✅ Thumbnail created: ${finalThumbnailPath}`);
@@ -401,7 +418,7 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
             console.log('\n🚀 Starting social media promotion...');
             
             const promotionManager = new PromotionManager({
-              headless: config.headless || true,
+              headless: config.headless ?? false, // Show browser windows by default for easier login
               enabledPlatforms: config.promotionPlatforms
             });
             
@@ -459,7 +476,8 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
           images: imagePaths,
           voiceover: voiceoverPath,
           video: finalVideoPath,
-          thumbnail: thumbnailPath
+          thumbnail: finalThumbnailPath,
+          promotionThumbnail: promotionThumbnailPath
         },
         stats: {
           imagesDownloaded: imagePaths.length,
@@ -494,7 +512,8 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
           images: imagePaths,
           voiceover: voiceoverPath,
           video: finalVideoPath,
-          thumbnail: thumbnailPath
+          thumbnail: finalThumbnailPath,
+          promotionThumbnail: promotionThumbnailPath
         },
         stats: {
           imagesDownloaded: imagePaths.length,

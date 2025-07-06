@@ -1,363 +1,247 @@
-import { spawn } from 'child_process';
+import ffmpeg from 'fluent-ffmpeg';
+import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
 
 /**
- * Default thumbnail configuration
+ * Utility to generate thumbnails for existing videos that don't have them
  */
-const DEFAULT_THUMBNAIL_CONFIG = {
-  width: 1280,
-  height: 720,
-  quality: 95,
-  format: 'jpg',
-  backgroundColor: '#1a1a1a',
-  textColor: '#ffffff',
-  accentColor: '#ff6b35',
-  fontSize: {
-    title: 48,
-    subtitle: 32,
-    rating: 36,
-    price: 42
-  },
-  padding: 60,
-  borderRadius: 20
-};
-
-/**
- * Creates a high-quality YouTube thumbnail from product data
- * @param {Object} productData - Product information
- * @param {string} outputPath - Path for the thumbnail image
- * @param {Object} config - Thumbnail configuration options
- * @returns {Promise<string>} Path to created thumbnail
- */
-export const createThumbnail = async (productData, outputPath, config = {}) => {
-  const thumbnailConfig = { ...DEFAULT_THUMBNAIL_CONFIG, ...config };
-  
-  if (!productData || typeof productData !== 'object') {
-    throw new Error('Product data is required and must be an object');
+export class ThumbnailGenerator {
+  constructor(config = {}) {
+    this.outputDir = config.outputDir || './output';
+    this.tempDir = config.tempDir || './temp';
   }
 
-  const {
-    title = 'Product Review',
-    price = '',
-    rating = '',
-    images = []
-  } = productData;
-
-  // Ensure output directory exists
-  const outputDir = path.dirname(outputPath);
-  await fs.mkdir(outputDir, { recursive: true });
-
-  console.log('🎨 Creating YouTube thumbnail...');
-  console.log(`📐 Size: ${thumbnailConfig.width}x${thumbnailConfig.height}`);
-  console.log(`📄 Title: ${title}`);
-
-  // Use the first product image if available
-  const productImagePath = images.length > 0 ? images[0] : null;
-  
-  if (productImagePath && productImagePath.startsWith('http')) {
-    // Download the product image first
-    const localImagePath = await downloadProductImage(productImagePath);
-    return await createThumbnailWithImage(
-      title, 
-      price, 
-      rating, 
-      localImagePath, 
-      outputPath, 
-      thumbnailConfig
-    );
-  } else if (productImagePath) {
-    // Use local image
-    return await createThumbnailWithImage(
-      title, 
-      price, 
-      rating, 
-      productImagePath, 
-      outputPath, 
-      thumbnailConfig
-    );
-  } else {
-    // Create text-only thumbnail
-    return await createTextOnlyThumbnail(
-      title, 
-      price, 
-      rating, 
-      outputPath, 
-      thumbnailConfig
-    );
-  }
-};
-
-/**
- * Downloads a product image for thumbnail use
- * @param {string} imageUrl - URL of the image to download
- * @returns {Promise<string>} Path to downloaded image
- */
-const downloadProductImage = async (imageUrl) => {
-  const tempImagePath = 'temp/thumbnail-product-image.jpg';
-  
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const response = await fetch(imageUrl);
-    
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.statusText}`);
+  /**
+   * Scan for videos without thumbnails
+   */
+  async scanForVideosWithoutThumbnails() {
+    try {
+      const files = await fs.readdir(this.outputDir);
+      const videoFiles = files.filter(file => 
+        file.endsWith('.mp4') || file.endsWith('.mov') || file.endsWith('.avi')
+      );
+      
+      const videosNeedingThumbnails = [];
+      
+      for (const videoFile of videoFiles) {
+        const baseName = path.parse(videoFile).name;
+        const videoPath = path.join(this.outputDir, videoFile);
+        
+        // Check if thumbnails already exist
+        const possibleThumbnails = [
+          `${baseName}-thumbnail.jpg`,
+          `${baseName}-thumbnail.png`,
+          `${baseName}.jpg`,
+          `${baseName}.png`
+        ];
+        
+        let hasThumbnail = false;
+        for (const thumbName of possibleThumbnails) {
+          const thumbPath = path.join(this.outputDir, thumbName);
+          try {
+            await fs.access(thumbPath);
+            hasThumbnail = true;
+            break;
+          } catch {
+            // Thumbnail doesn't exist, continue
+          }
+        }
+        
+        if (!hasThumbnail) {
+          videosNeedingThumbnails.push({
+            filename: videoFile,
+            path: videoPath,
+            baseName
+          });
+        }
+      }
+      
+      return videosNeedingThumbnails;
+    } catch (error) {
+      console.error(`Failed to scan for videos: ${error.message}`);
+      return [];
     }
-    
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.writeFile(tempImagePath, buffer);
-    
-    console.log(`📥 Downloaded product image: ${tempImagePath}`);
-    return tempImagePath;
-  } catch (error) {
-    console.warn(`⚠️ Failed to download product image: ${error.message}`);
-    return null;
   }
-};
 
-/**
- * Creates a thumbnail with product image
- * @param {string} title - Product title
- * @param {string} price - Product price
- * @param {string} rating - Product rating
- * @param {string} imagePath - Path to product image
- * @param {string} outputPath - Output path for thumbnail
- * @param {Object} config - Thumbnail configuration
- * @returns {Promise<string>} Path to created thumbnail
- */
-const createThumbnailWithImage = async (title, price, rating, imagePath, outputPath, config) => {
-  return new Promise((resolve, reject) => {
-    // Clean title for display (max 60 characters)
-    const displayTitle = title.length > 60 ? title.substring(0, 57) + '...' : title;
-    
-    // Create rating text
-    const ratingText = rating ? `⭐ ${rating}` : '';
-    
-    // Create price text
-    const priceText = price ? `💰 ${price}` : '';
-    
-    // Build ImageMagick command for thumbnail with product image
-    const magickArgs = [
-      // Create base canvas
-      '-size', `${config.width}x${config.height}`,
-      `canvas:${config.backgroundColor}`,
-      
-      // Add product image (resized and positioned)
-      '(', imagePath,
-      '-resize', '400x400^',
-      '-gravity', 'center',
-      '-extent', '400x400',
-      '-bordercolor', config.accentColor,
-      '-border', '3',
-      ')',
-      '-gravity', 'west',
-      '-geometry', `+${config.padding}+0`,
-      '-composite',
-      
-      // Add title text
-      
-      '-pointsize', config.fontSize.title.toString(),
-      '-fill', config.textColor,
-      '-gravity', 'northeast',
-      '-annotate', `+${config.padding}+${config.padding}`, displayTitle,
-      
-      // Add "REVIEW" badge
-      
-      '-pointsize', '28',
-      '-fill', config.accentColor,
-      '-gravity', 'northeast',
-      '-annotate', `+${config.padding}+${config.padding + 60}`, 'HONEST REVIEW',
-      
-      // Add rating if available
-      ...(ratingText ? [
-        
-        '-pointsize', config.fontSize.rating.toString(),
-        '-fill', '#ffd700',
-        '-gravity', 'east',
-        '-annotate', `+${config.padding}+${-config.padding}`, ratingText
-      ] : []),
-      
-      // Add price if available
-      ...(priceText ? [
-        
-        '-pointsize', config.fontSize.price.toString(),
-        '-fill', '#00ff00',
-        '-gravity', 'southeast',
-        '-annotate', `+${config.padding}+${config.padding}`, priceText
-      ] : []),
-      
-      // Add quality and format
-      '-quality', config.quality.toString(),
-      outputPath
-    ];
-
-    console.log('🎨 ImageMagick thumbnail command:', 'magick', magickArgs.join(' '));
-
-    const magickProcess = spawn('magick', magickArgs, {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stderr = '';
-
-    magickProcess.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    magickProcess.on('close', async (code) => {
-      if (code === 0) {
-        try {
-          const stats = await fs.stat(outputPath);
-          console.log(`✅ Thumbnail created: ${outputPath} (${Math.round(stats.size / 1024)}KB)`);
+  /**
+   * Extract frame from video using ffmpeg
+   */
+  async extractFrameFromVideo(videoPath, outputPath) {
+    return new Promise((resolve, reject) => {
+      ffmpeg(videoPath)
+        .seekInput(2) // Seek to 2 seconds to avoid black frames
+        .frames(1)
+        .output(outputPath)
+        .on('end', () => {
+          console.log(`✅ Frame extracted: ${outputPath}`);
           resolve(outputPath);
-        } catch (error) {
-          reject(new Error(`Thumbnail verification failed: ${error.message}`));
-        }
-      } else {
-        console.error('❌ ImageMagick stderr:', stderr);
-        reject(new Error(`ImageMagick failed with exit code ${code}: ${stderr}`));
+        })
+        .on('error', (error) => {
+          console.error(`❌ Failed to extract frame: ${error.message}`);
+          reject(error);
+        })
+        .run();
+    });
+  }
+
+  /**
+   * Create YouTube-style thumbnail (1280x720)
+   */
+  async createYouTubeThumbnail(framePath, outputPath) {
+    try {
+      await sharp(framePath)
+        .resize(1280, 720, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .jpeg({ quality: 90 })
+        .toFile(outputPath);
+      
+      console.log(`✅ YouTube thumbnail created: ${outputPath}`);
+      return outputPath;
+    } catch (error) {
+      console.error(`❌ Failed to create YouTube thumbnail: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Create Pinterest-style thumbnail (1000x1500)
+   */
+  async createPinterestThumbnail(framePath, outputPath) {
+    try {
+      await sharp(framePath)
+        .resize(1000, 1500, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .png({ quality: 90 })
+        .toFile(outputPath);
+      
+      console.log(`✅ Pinterest thumbnail created: ${outputPath}`);
+      return outputPath;
+    } catch (error) {
+      console.error(`❌ Failed to create Pinterest thumbnail: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate thumbnails for a single video
+   */
+  async generateThumbnailsForVideo(video) {
+    try {
+      console.log(`🎬 Processing: ${video.filename}`);
+      
+      // Ensure temp directory exists
+      await fs.mkdir(this.tempDir, { recursive: true });
+      
+      // Extract frame from video
+      const tempFramePath = path.join(this.tempDir, `frame-${video.baseName}.jpg`);
+      await this.extractFrameFromVideo(video.path, tempFramePath);
+      
+      // Create YouTube thumbnail (JPG)
+      const youtubeThumbnailPath = path.join(this.outputDir, `${video.baseName}-thumbnail.jpg`);
+      await this.createYouTubeThumbnail(tempFramePath, youtubeThumbnailPath);
+      
+      // Create Pinterest thumbnail (PNG)
+      const pinterestThumbnailPath = path.join(this.outputDir, `${video.baseName}.png`);
+      await this.createPinterestThumbnail(tempFramePath, pinterestThumbnailPath);
+      
+      // Cleanup temp frame
+      try {
+        await fs.unlink(tempFramePath);
+      } catch (error) {
+        console.warn(`⚠️  Failed to cleanup temp frame: ${error.message}`);
       }
-    });
+      
+      return {
+        success: true,
+        youtubeThumbnail: youtubeThumbnailPath,
+        pinterestThumbnail: pinterestThumbnailPath
+      };
+      
+    } catch (error) {
+      console.error(`❌ Failed to generate thumbnails for ${video.filename}: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
 
-    magickProcess.on('error', (error) => {
-      reject(new Error(`Failed to start ImageMagick: ${error.message}`));
-    });
-  });
-};
-
-/**
- * Creates a text-only thumbnail when no product image is available
- * @param {string} title - Product title
- * @param {string} price - Product price
- * @param {string} rating - Product rating
- * @param {string} outputPath - Output path for thumbnail
- * @param {Object} config - Thumbnail configuration
- * @returns {Promise<string>} Path to created thumbnail
- */
-const createTextOnlyThumbnail = async (title, price, rating, outputPath, config) => {
-  return new Promise((resolve, reject) => {
-    // Clean title for display
-    const displayTitle = title.length > 80 ? title.substring(0, 77) + '...' : title;
-    
-    // Create rating text
-    const ratingText = rating ? `⭐ ${rating} STARS` : '';
-    
-    // Create price text
-    const priceText = price ? `💰 ${price}` : '';
-    
-    // Build ImageMagick command for text-only thumbnail
-    const magickArgs = [
-      // Create gradient background
-      '-size', `${config.width}x${config.height}`,
-      'gradient:#2c3e50-#34495e',
+  /**
+   * Generate thumbnails for all videos that need them
+   */
+  async generateMissingThumbnails() {
+    try {
+      console.log('🔍 Scanning for videos without thumbnails...');
       
-      // Add main title
+      const videosNeedingThumbnails = await this.scanForVideosWithoutThumbnails();
       
-      '-pointsize', config.fontSize.title.toString(),
-      '-fill', config.textColor,
-      '-gravity', 'center',
-      '-annotate', '+0-100', displayTitle,
-      
-      // Add "PRODUCT REVIEW" subtitle
-      
-      '-pointsize', config.fontSize.subtitle.toString(),
-      '-fill', config.accentColor,
-      '-gravity', 'center',
-      '-annotate', '+0-40', 'PRODUCT REVIEW',
-      
-      // Add rating if available
-      ...(ratingText ? [
-        
-        '-pointsize', config.fontSize.rating.toString(),
-        '-fill', '#ffd700',
-        '-gravity', 'center',
-        '-annotate', '+0+40', ratingText
-      ] : []),
-      
-      // Add price if available
-      ...(priceText ? [
-        
-        '-pointsize', config.fontSize.price.toString(),
-        '-fill', '#00ff00',
-        '-gravity', 'center',
-        '-annotate', '+0+100', priceText
-      ] : []),
-      
-      // Add decorative elements
-      '-stroke', config.accentColor,
-      '-strokewidth', '3',
-      '-fill', 'none',
-      '-draw', `roundrectangle ${config.padding},${config.padding} ${config.width - config.padding},${config.height - config.padding} ${config.borderRadius},${config.borderRadius}`,
-      
-      // Add quality and format
-      '-quality', config.quality.toString(),
-      outputPath
-    ];
-
-    console.log('🎨 ImageMagick text thumbnail command:', 'magick', magickArgs.join(' '));
-
-    const magickProcess = spawn('magick', magickArgs, {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stderr = '';
-
-    magickProcess.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    magickProcess.on('close', async (code) => {
-      if (code === 0) {
-        try {
-          const stats = await fs.stat(outputPath);
-          console.log(`✅ Text thumbnail created: ${outputPath} (${Math.round(stats.size / 1024)}KB)`);
-          resolve(outputPath);
-        } catch (error) {
-          reject(new Error(`Thumbnail verification failed: ${error.message}`));
-        }
-      } else {
-        console.error('❌ ImageMagick stderr:', stderr);
-        reject(new Error(`ImageMagick failed with exit code ${code}: ${stderr}`));
+      if (videosNeedingThumbnails.length === 0) {
+        console.log('✅ All videos already have thumbnails!');
+        return { success: true, processed: 0 };
       }
-    });
-
-    magickProcess.on('error', (error) => {
-      reject(new Error(`Failed to start ImageMagick: ${error.message}`));
-    });
-  });
-};
-
-/**
- * Validates thumbnail creation inputs
- * @param {Object} productData - Product data to validate
- * @param {string} outputPath - Output path to validate
- * @throws {Error} When validation fails
- */
-export const validateThumbnailInputs = (productData, outputPath) => {
-  if (!productData || typeof productData !== 'object') {
-    throw new Error('Product data is required and must be an object');
+      
+      console.log(`📹 Found ${videosNeedingThumbnails.length} videos needing thumbnails:`);
+      videosNeedingThumbnails.forEach(video => {
+        console.log(`   - ${video.filename}`);
+      });
+      
+      const results = [];
+      
+      for (const video of videosNeedingThumbnails) {
+        const result = await this.generateThumbnailsForVideo(video);
+        results.push({
+          video: video.filename,
+          ...result
+        });
+        
+        // Small delay between processing
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      const successful = results.filter(r => r.success).length;
+      const failed = results.length - successful;
+      
+      console.log('\n📊 Thumbnail Generation Results:');
+      console.log('='.repeat(40));
+      console.log(`✅ Successful: ${successful}`);
+      console.log(`❌ Failed: ${failed}`);
+      
+      if (failed > 0) {
+        console.log('\n❌ Failed videos:');
+        results.filter(r => !r.success).forEach(result => {
+          console.log(`   - ${result.video}: ${result.error}`);
+        });
+      }
+      
+      return {
+        success: successful > 0,
+        processed: successful,
+        failed,
+        results
+      };
+      
+    } catch (error) {
+      console.error(`❌ Thumbnail generation failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
+}
 
-  if (!outputPath || typeof outputPath !== 'string') {
-    throw new Error('Output path is required and must be a string');
-  }
+// CLI interface
+async function runCLI() {
+  const generator = new ThumbnailGenerator();
+  await generator.generateMissingThumbnails();
+}
 
-  if (!productData.title) {
-    throw new Error('Product title is required for thumbnail generation');
-  }
-};
-
-/**
- * Gets thumbnail dimensions for different platforms
- * @param {string} platform - Platform name ('youtube', 'instagram', 'facebook')
- * @returns {Object} Dimensions object with width and height
- */
-export const getThumbnailDimensions = (platform = 'youtube') => {
-  const dimensions = {
-    youtube: { width: 1280, height: 720 },
-    instagram: { width: 1080, height: 1080 },
-    facebook: { width: 1200, height: 630 },
-    twitter: { width: 1200, height: 675 }
-  };
-
-  return dimensions[platform] || dimensions.youtube;
-};
+// Run CLI if this file is executed directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runCLI().catch(console.error);
+}

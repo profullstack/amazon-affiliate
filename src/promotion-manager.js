@@ -10,7 +10,7 @@ import fs from 'fs/promises';
 export class PromotionManager {
   constructor(config = {}) {
     this.config = {
-      headless: true,
+      headless: false, // Show browser windows by default for easier login
       timeout: 30000,
       enabledPlatforms: ['reddit', 'pinterest', 'twitter'],
       maxConcurrentPromotions: 1, // Run promotions sequentially to avoid detection

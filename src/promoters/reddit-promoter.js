@@ -134,27 +134,83 @@ export class RedditPromoter extends BasePromoter {
   }
 
   /**
-   * Verify Reddit login
+   * Verify Reddit login with improved detection
    */
   async verifyLogin() {
     try {
-      // Check for user menu or profile link
-      const loginIndicators = [
+      // Wait a bit for page to load
+      await this.randomDelay(2000, 4000);
+      
+      this.logger.info('Checking Reddit login status...');
+      
+      // Take screenshot for debugging
+      await this.takeScreenshot('reddit-login-check');
+      
+      // Method 1: Check for user menu elements (most reliable)
+      const userMenuSelectors = [
         '[data-testid="user-menu-button"]',
-        '.header-user-dropdown',
-        '[data-click-id="profile"]'
+        '[data-testid="user-menu"]',
+        '[aria-label="User account menu"]',
+        'button[aria-label*="profile"]',
+        'button[aria-label*="account"]',
+        '.Header__profile',
+        '#USER_DROPDOWN_ID'
       ];
       
-      for (const selector of loginIndicators) {
-        if (await this.waitForElement(selector, 3000)) {
+      for (const selector of userMenuSelectors) {
+        if (await this.waitForElement(selector, 1000)) {
+          this.logger.info(`✅ Found user menu: ${selector}`);
           this.isLoggedIn = true;
           return true;
         }
       }
       
+      // Method 2: Check for post creation elements (appears when logged in)
+      const loggedInFeatures = [
+        '[data-testid="subreddit-post-sort-select"]',
+        'button[aria-label*="Create Post"]',
+        '[data-click-id="post"]',
+        '.submit-link'
+      ];
+      
+      for (const selector of loggedInFeatures) {
+        if (await this.waitForElement(selector, 1000)) {
+          this.logger.info(`✅ Found logged-in feature: ${selector}`);
+          this.isLoggedIn = true;
+          return true;
+        }
+      }
+      
+      // Method 3: Check for absence of login button
+      const loginButtons = await this.page.$$('a[href*="login"], button:contains("Log In"), a:contains("Log In"), a[href*="register"]');
+      if (loginButtons.length === 0) {
+        this.logger.info('✅ No login buttons found - likely logged in');
+        this.isLoggedIn = true;
+        return true;
+      }
+      
+      // Method 4: Check URL patterns
+      const currentUrl = this.page.url();
+      if (currentUrl.includes('/user/') || currentUrl.includes('/settings/') || currentUrl.includes('/submit')) {
+        this.logger.info(`✅ URL indicates logged in: ${currentUrl}`);
+        this.isLoggedIn = true;
+        return true;
+      }
+      
+      // Method 5: Check page content for username
+      const pageContent = await this.page.content();
+      if (pageContent.includes('karma') && pageContent.includes('My Subreddits')) {
+        this.logger.info('✅ Page content indicates logged in');
+        this.isLoggedIn = true;
+        return true;
+      }
+      
+      this.logger.warn('❌ No login indicators found - user needs to log in');
       return false;
+      
     } catch (error) {
       this.logger.error(`Login verification failed: ${error.message}`);
+      await this.takeScreenshot('reddit-login-error');
       return false;
     }
   }

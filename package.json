@@ -10,6 +10,8 @@
     "test:watch": "mocha test/**/*.test.js --watch --timeout 30000",
     "test:promotion": "node test-promotion.js",
     "promote": "node src/promotion-cli.js",
+    "promote:local": "node src/local-video-promoter.js",
+    "generate-thumbnails": "node src/thumbnail-generator.js",
     "promote:test": "node src/promotion-cli.js test",
     "promote:stats": "node src/promotion-cli.js stats",
     "promote:history": "node src/promotion-cli.js history",

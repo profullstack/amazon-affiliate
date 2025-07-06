@@ -239,18 +239,53 @@ export class TwitterPromoter extends BasePromoter {
    * Navigate to tweet compose
    */
   async navigateToCompose() {
-    // Click the tweet button
-    const tweetButton = '[data-testid="SideTweetButton"]';
-    if (await this.waitForElement(tweetButton, 5000)) {
-      await this.clickElement(tweetButton);
-    } else {
-      // Alternative: use the floating action button
-      const floatingButton = '[data-testid="floatingActionButton"]';
-      await this.clickElement(floatingButton);
+    // Updated Twitter selectors for 2025
+    const tweetButtonSelectors = [
+      '[data-testid="SideTweetButton"]',
+      '[data-testid="floatingActionButton"]',
+      '[aria-label="Post"]',
+      '[data-testid="tweetButton"]',
+      'a[href="/compose/tweet"]',
+      'div[data-testid="SideNav_NewTweet_Button"]',
+      'button[data-testid="tweetButtonInline"]'
+    ];
+
+    let tweetButtonFound = false;
+    
+    for (const selector of tweetButtonSelectors) {
+      try {
+        if (await this.waitForElement(selector, 3000)) {
+          await this.clickElement(selector);
+          tweetButtonFound = true;
+          this.logger.info(`Found tweet button with selector: ${selector}`);
+          break;
+        }
+      } catch (error) {
+        this.logger.warn(`Tweet button selector ${selector} not found: ${error.message}`);
+        continue;
+      }
     }
     
-    // Wait for compose modal
-    return await this.waitForElement('[data-testid="tweetTextarea_0"]', 10000);
+    if (!tweetButtonFound) {
+      throw new Error('Could not find tweet compose button');
+    }
+    
+    // Wait for compose modal or textarea
+    const composeSelectors = [
+      '[data-testid="tweetTextarea_0"]',
+      '[data-testid="tweetTextarea_1"]',
+      'div[contenteditable="true"][data-testid*="tweet"]',
+      'div[role="textbox"][data-testid*="tweet"]'
+    ];
+    
+    for (const selector of composeSelectors) {
+      if (await this.waitForElement(selector, 5000)) {
+        this.logger.info(`Found compose area with selector: ${selector}`);
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   /**
