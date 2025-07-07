@@ -2,11 +2,12 @@ import 'dotenv/config';
 import { scrapeAmazonProduct } from './amazon-scraper.js';
 import { downloadImages, cleanupImages } from './image-downloader.js';
 import { generateVoiceover } from './voiceover-generator.js';
-import { generateAIReviewScript } from './openai-script-generator.js';
+import { generateAIReviewScript, generateAIVideoTitle, generateAIVideoDescription } from './openai-script-generator.js';
 import { createSlideshow } from './video-creator.js';
 import { createThumbnail } from './thumbnail-generator.js';
 import { uploadToYouTube } from './youtube-publisher.js';
 import { PromotionManager } from './promotion-manager.js';
+import { writeVideoDescription } from './description-writer.js';
 import fs from 'fs/promises';
 
 /**
@@ -147,6 +148,52 @@ const generateVideoDescription = (productDescription, productTitle) => {
 };
 
 /**
+ * Generates affiliate URL from product URL
+ * @param {string} productUrl - Original Amazon product URL
+ * @param {string} affiliateTag - Amazon affiliate tag
+ * @returns {string} - URL with affiliate tag
+ */
+const generateAffiliateUrl = (productUrl, affiliateTag) => {
+  if (!productUrl || !affiliateTag) {
+    return productUrl || '';
+  }
+
+  try {
+    const url = new URL(productUrl);
+    url.searchParams.set('tag', affiliateTag);
+    return url.toString();
+  } catch {
+    // If URL parsing fails, return original URL
+    return productUrl;
+  }
+};
+
+/**
+ * Builds complete video description with affiliate link
+ * @param {string} baseDescription - Base description text
+ * @param {string} productUrl - Amazon product URL
+ * @param {string} affiliateTag - Amazon affiliate tag
+ * @returns {string} - Complete description with affiliate link
+ */
+const buildCompleteDescription = (baseDescription, productUrl, affiliateTag) => {
+  let description = baseDescription || '';
+
+  if (productUrl && affiliateTag) {
+    const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
+    
+    if (description.length > 0) {
+      description += '\n\n';
+    }
+    
+    description += `🛒 Get this product here: ${affiliateUrl}\n\n`;
+    description += '⚠️ As an Amazon Associate, I earn from qualifying purchases.\n';
+    description += 'This helps support the channel at no extra cost to you!';
+  }
+
+  return description;
+};
+
+/**
  * Creates timing information for performance tracking
  * @param {Object} timings - Step timings object
  * @returns {Object} - Formatted timing information
@@ -275,12 +322,22 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
     tempFiles.push(voiceoverPath);
     console.log(`✅ Voiceover generated: ${voiceoverPath}`);
 
-    // Step 5: Create video
+    // Step 5: Generate AI-optimized video title
+    reportProgress(config.onProgress, 'titleGeneration', 60, 'Generating AI-optimized video title');
+    timings.titleGeneration = { start: Date.now() };
+    
+    const videoTitle = await generateAIVideoTitle(productData, {
+      temperature: 0.8
+    });
+    
+    timings.titleGeneration.end = Date.now();
+    console.log(`✅ AI video title generated: "${videoTitle}"`);
+    
+    const safeFilename = generateSafeFilename(videoTitle);
+
+    // Step 6: Create video
     reportProgress(config.onProgress, 'videoCreation', 70, 'Creating slideshow video');
     timings.videoCreation = { start: Date.now() };
-    
-    const videoTitle = generateVideoTitle(productData.title);
-    const safeFilename = generateSafeFilename(videoTitle);
     
     // Ensure output directory exists
     await fs.mkdir(config.outputDir, { recursive: true });
@@ -309,13 +366,13 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
     timings.videoCreation.end = Date.now();
     console.log(`✅ Video created: ${finalVideoPath}`);
 
-    // Step 6: Create thumbnail
+    // Step 7: Create thumbnail
     reportProgress(config.onProgress, 'thumbnailCreation', 80, 'Creating YouTube thumbnail');
     timings.thumbnailCreation = { start: Date.now() };
     
     const thumbnailPath = `${config.outputDir}/${safeFilename}-thumbnail.jpg`;
-    const promotionThumbnailPath = `${config.outputDir}/${safeFilename}.png`;
     let finalThumbnailPath = null;
+    let promotionThumbnailPath = null;
     
     try {
       finalThumbnailPath = await createThumbnail(
@@ -323,11 +380,12 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
         thumbnailPath
       );
       
-      // Also save a PNG version for promotions (Pinterest works better with PNG)
-      if (finalThumbnailPath) {
+      // Only create PNG version if promotion is enabled
+      if (finalThumbnailPath && config.autoPromote) {
         try {
           // Import sharp for image conversion
           const sharp = (await import('sharp')).default;
+          promotionThumbnailPath = `${config.outputDir}/${safeFilename}.png`;
           
           await sharp(finalThumbnailPath)
             .png()
@@ -336,6 +394,7 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
           console.log(`✅ Promotion thumbnail created: ${promotionThumbnailPath}`);
         } catch (conversionError) {
           console.warn(`⚠️ Failed to create PNG thumbnail for promotions: ${conversionError.message}`);
+          promotionThumbnailPath = null;
         }
       }
       
@@ -347,7 +406,41 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
       timings.thumbnailCreation = { start: timings.thumbnailCreation.start, end: Date.now() };
     }
 
-    // Step 7: Review video before upload
+    // Step 8: Generate AI-optimized video description
+    reportProgress(config.onProgress, 'descriptionGeneration', 82, 'Generating AI-optimized video description');
+    timings.descriptionGeneration = { start: Date.now() };
+    
+    const baseVideoDescription = await generateAIVideoDescription(productData, videoTitle, {
+      temperature: 0.7,
+      includeTimestamps: true,
+      includeHashtags: true
+    });
+    
+    // Build complete description with affiliate link
+    const affiliateTag = process.env.AFFILIATE_TAG;
+    const videoDescription = buildCompleteDescription(baseVideoDescription, productUrl, affiliateTag);
+    
+    timings.descriptionGeneration.end = Date.now();
+    console.log(`✅ AI video description generated (${videoDescription.length} characters)`);
+
+    // Step 9: Save video description to file
+    reportProgress(config.onProgress, 'descriptionSaving', 84, 'Saving video description to file');
+    let descriptionFilePath = null;
+    
+    try {
+      const descriptionResult = await writeVideoDescription(
+        videoDescription,
+        videoTitle,
+        config.outputDir
+      );
+      descriptionFilePath = descriptionResult.filePath;
+      console.log(`✅ Video description saved: ${descriptionResult.filename}`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to save video description: ${error.message}`);
+      console.log('📹 Continuing...');
+    }
+
+    // Step 10: Review video before upload
     reportProgress(config.onProgress, 'review', 85, 'Video ready for review');
     
     console.log('\n🎬 Video creation completed successfully!');
@@ -376,11 +469,9 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
     );
     
     if (shouldUpload) {
-      // Step 8: Upload to YouTube
+      // Step 11: Upload to YouTube
       reportProgress(config.onProgress, 'youtubeUpload', 90, 'Uploading to YouTube');
       timings.youtubeUpload = { start: Date.now() };
-      
-      const videoDescription = generateVideoDescription(productData.description, productData.title);
       
       const uploadOptions = {
         thumbnailPath: finalThumbnailPath, // Pass thumbnail path for upload
@@ -402,7 +493,7 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
       timings.youtubeUpload.end = Date.now();
       console.log(`✅ Video uploaded to YouTube: ${uploadResult.url}`);
       
-      // Step 9: Promote video (if enabled)
+      // Step 11: Promote video (if enabled)
       let promotionResults = null;
       if (config.autoPromote) {
         const shouldPromote = await promptUserConfirmation(
@@ -477,7 +568,8 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
           voiceover: voiceoverPath,
           video: finalVideoPath,
           thumbnail: finalThumbnailPath,
-          promotionThumbnail: promotionThumbnailPath
+          promotionThumbnail: promotionThumbnailPath,
+          description: descriptionFilePath
         },
         stats: {
           imagesDownloaded: imagePaths.length,
@@ -513,7 +605,8 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
           voiceover: voiceoverPath,
           video: finalVideoPath,
           thumbnail: finalThumbnailPath,
-          promotionThumbnail: promotionThumbnailPath
+          promotionThumbnail: promotionThumbnailPath,
+          description: descriptionFilePath
         },
         stats: {
           imagesDownloaded: imagePaths.length,

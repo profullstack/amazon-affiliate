@@ -44,17 +44,25 @@ const getFileExtension = url => {
 const getImageQualityVersions = imageUrl => {
   if (!imageUrl) return [];
   
-  const baseUrl = imageUrl.replace(/\._[^.]*_\./, '.').replace(/\.[^.]+$/, '');
-  const extension = imageUrl.match(/\.[^.]+$/)?.[0] || '.jpg';
-  
-  if (baseUrl.includes('amazon.com') || baseUrl.includes('ssl-images-amazon.com')) {
+  // For Amazon images, try to extract the base URL and construct different sizes
+  if (imageUrl.includes('amazon.com') || imageUrl.includes('ssl-images-amazon.com')) {
+    // Remove existing size parameters like ._SL1500_. or ._AC_SL1500_.
+    let baseUrl = imageUrl.replace(/\._[A-Z]*_?SL\d+_?\./g, '.');
+    
+    // Extract extension
+    const extensionMatch = baseUrl.match(/\.([a-zA-Z]{3,4})$/);
+    const extension = extensionMatch ? extensionMatch[0] : '.jpg';
+    
+    // Remove extension to get clean base
+    const cleanBase = baseUrl.replace(/\.[a-zA-Z]{3,4}$/, '');
+    
     return [
-      baseUrl + '._SL1500_.' + extension,  // 1500px (ultra high)
-      baseUrl + '._SL1200_.' + extension,  // 1200px (very high)
-      baseUrl + '._SL1000_.' + extension,  // 1000px (high)
-      baseUrl + '._SL800_.' + extension,   // 800px (good)
-      baseUrl + '._SL600_.' + extension,   // 600px (decent)
-      baseUrl + extension                  // Original
+      `${cleanBase}._SL1500_${extension}`,  // 1500px (ultra high)
+      `${cleanBase}._SL1200_${extension}`,  // 1200px (very high)
+      `${cleanBase}._SL1000_${extension}`,  // 1000px (high)
+      `${cleanBase}._SL800_${extension}`,   // 800px (good)
+      `${cleanBase}._SL600_${extension}`,   // 600px (decent)
+      imageUrl                              // Original URL as fallback
     ];
   }
   
@@ -71,6 +79,9 @@ const getImageQualityVersions = imageUrl => {
 const downloadSingleImage = async (url, filePath, retries = 2) => {
   const qualityVersions = getImageQualityVersions(url);
   
+  console.log(`🔍 Original URL: ${url}`);
+  console.log(`🔍 Generated ${qualityVersions.length} quality versions`);
+  
   // Try each quality version in order (highest to lowest)
   for (let versionIndex = 0; versionIndex < qualityVersions.length; versionIndex++) {
     const currentUrl = qualityVersions[versionIndex];
@@ -80,7 +91,7 @@ const downloadSingleImage = async (url, filePath, retries = 2) => {
                         versionIndex === 3 ? 'good' :
                         versionIndex === 4 ? 'decent' : 'original';
     
-    console.log(`📥 Trying ${qualityLabel} quality version...`);
+    console.log(`📥 Trying ${qualityLabel} quality version: ${currentUrl}`);
     
     // Try downloading this quality version with retries
     for (let attempt = 0; attempt < retries; attempt++) {

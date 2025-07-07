@@ -35,10 +35,12 @@ class LocalVideoPromoter {
         // Look for corresponding thumbnail
         const baseName = path.parse(videoFile).name;
         const possibleThumbnails = [
-          `${baseName}-thumbnail.jpg`,
+          `${baseName}.thumbnail.png`,
           `${baseName}-thumbnail.png`,
-          `${baseName}.jpg`,
-          `${baseName}.png`
+          `${baseName}.png`,
+          `${baseName}-thumbnail.jpg`,
+          `${baseName}.thumbnail.jpg`,
+          `${baseName}.jpg`
         ];
         
         let thumbnailPath = null;
@@ -52,11 +54,87 @@ class LocalVideoPromoter {
             // Thumbnail doesn't exist, continue
           }
         }
+
+        // Look for description files (.txt for clean, .md for markdown)
+        // Try exact match first, then fuzzy match for different timestamps
+        let title = '';
+        let cleanDescription = '';
+        let markdownDescription = '';
+        let txtPath = null;
+        let mdPath = null;
+        
+        // First try exact match
+        const exactTxtPath = path.join(this.outputDir, `${baseName}.txt`);
+        const exactMdPath = path.join(this.outputDir, `${baseName}.md`);
+        
+        try {
+          await fs.access(exactTxtPath);
+          txtPath = exactTxtPath;
+        } catch {
+          // Try fuzzy match for .txt files
+          const baseNameWithoutTimestamp = baseName.replace(/-\d{6}$/, '');
+          const files = await fs.readdir(this.outputDir);
+          const matchingTxtFile = files.find(file =>
+            file.endsWith('.txt') &&
+            file.startsWith(baseNameWithoutTimestamp) &&
+            file.includes(baseNameWithoutTimestamp)
+          );
+          if (matchingTxtFile) {
+            txtPath = path.join(this.outputDir, matchingTxtFile);
+          }
+        }
+        
+        try {
+          await fs.access(exactMdPath);
+          mdPath = exactMdPath;
+        } catch {
+          // Try fuzzy match for .md files
+          const baseNameWithoutTimestamp = baseName.replace(/-\d{6}$/, '');
+          const files = await fs.readdir(this.outputDir);
+          const matchingMdFile = files.find(file =>
+            file.endsWith('.md') &&
+            file.startsWith(baseNameWithoutTimestamp) &&
+            file.includes(baseNameWithoutTimestamp)
+          );
+          if (matchingMdFile) {
+            mdPath = path.join(this.outputDir, matchingMdFile);
+          }
+        }
+        
+        // Read .txt file if found
+        if (txtPath) {
+          try {
+            const txtContent = await fs.readFile(txtPath, 'utf-8');
+            const lines = txtContent.split('\n');
+            title = lines[0]?.trim() || '';
+            cleanDescription = lines.slice(1).join('\n').trim();
+          } catch (error) {
+            console.warn(`⚠️ Could not read .txt file: ${txtPath}`);
+          }
+        }
+
+        // Read .md file if found
+        if (mdPath) {
+          try {
+            const mdContent = await fs.readFile(mdPath, 'utf-8');
+            const lines = mdContent.split('\n');
+            if (!title) {
+              // Extract title from markdown if not found in .txt
+              title = lines[0]?.trim().replace(/^#+\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1') || '';
+            }
+            markdownDescription = lines.slice(1).join('\n').trim();
+          } catch (error) {
+            console.warn(`⚠️ Could not read .md file: ${mdPath}`);
+          }
+        }
         
         videos.push({
           filename: videoFile,
           path: videoPath,
           thumbnailPath,
+          title,
+          cleanDescription,
+          markdownDescription,
           size: Math.round(stats.size / (1024 * 1024) * 10) / 10, // MB
           created: stats.birthtime.toLocaleDateString(),
           baseName
@@ -87,6 +165,9 @@ class LocalVideoPromoter {
       console.log(`   📁 Size: ${video.size}MB`);
       console.log(`   📅 Created: ${video.created}`);
       console.log(`   🖼️  Thumbnail: ${video.thumbnailPath ? '✅ Found' : '❌ Missing'}`);
+      console.log(`   📝 Title: ${video.title || '❌ Missing'}`);
+      console.log(`   📄 Clean Description: ${video.cleanDescription ? '✅ Found' : '❌ Missing'}`);
+      console.log(`   📝 Markdown Description: ${video.markdownDescription ? '✅ Found' : '❌ Missing'}`);
       console.log('');
     });
   }
@@ -111,6 +192,22 @@ class LocalVideoPromoter {
         }
       });
     });
+  }
+
+  /**
+   * Get appropriate description for platform
+   * @param {Object} video - Video object with descriptions
+   * @param {string} platform - Platform name (reddit, pinterest, twitter)
+   * @returns {string} - Appropriate description for the platform
+   */
+  getDescriptionForPlatform(video, platform) {
+    // Reddit supports markdown, so use markdown version if available
+    if (platform === 'reddit' && video.markdownDescription) {
+      return video.markdownDescription;
+    }
+    
+    // For other platforms or fallback, use clean description
+    return video.cleanDescription || video.markdownDescription || '';
   }
 
   /**
@@ -153,7 +250,7 @@ class LocalVideoPromoter {
     console.log(`\n📝 Enter details for: ${video.filename}`);
     console.log('='.repeat(50));
 
-    const defaultTitle = this.extractTitleFromFilename(video.filename);
+    const defaultTitle = video.title || this.extractTitleFromFilename(video.filename);
     const title = await prompt('Video title', defaultTitle);
     
     const url = await prompt('YouTube URL (required)');
@@ -162,7 +259,15 @@ class LocalVideoPromoter {
       return null;
     }
 
-    const description = await prompt('Video description (optional)');
+    // Show available descriptions
+    if (video.cleanDescription || video.markdownDescription) {
+      console.log('\n📄 Available descriptions:');
+      if (video.cleanDescription) console.log('   ✅ Clean version (for most platforms)');
+      if (video.markdownDescription) console.log('   ✅ Markdown version (for Reddit)');
+      console.log('   💡 Platform-specific descriptions will be used automatically');
+    }
+
+    const customDescription = await prompt('Custom description (optional, leave empty to use auto-detected)');
     
     const tagsInput = await prompt('Tags (comma-separated, optional)', 'review,product,amazon');
     const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()) : [];
@@ -173,10 +278,11 @@ class LocalVideoPromoter {
     return {
       title,
       url,
-      description,
+      description: customDescription, // Custom description if provided
       tags,
       platforms,
-      thumbnailPath: video.thumbnailPath
+      thumbnailPath: video.thumbnailPath,
+      video // Pass the video object for platform-specific descriptions
     };
   }
 
@@ -230,7 +336,7 @@ class LocalVideoPromoter {
         return;
       }
 
-      // Run promotion
+      // Run promotion with platform-specific descriptions
       console.log('\n🚀 Starting promotion...');
       
       const promotionManager = new PromotionManager({
@@ -238,7 +344,40 @@ class LocalVideoPromoter {
         enabledPlatforms: videoDetails.platforms
       });
 
-      const results = await promotionManager.promoteVideo(videoDetails);
+      // Create platform-specific video data
+      const baseVideoData = {
+        title: videoDetails.title,
+        url: videoDetails.url,
+        tags: videoDetails.tags,
+        thumbnailPath: videoDetails.thumbnailPath
+      };
+
+      let results;
+      
+      // Use custom description if provided, otherwise use platform-specific descriptions
+      if (videoDetails.description) {
+        baseVideoData.description = videoDetails.description;
+        results = await promotionManager.promoteVideo(baseVideoData);
+      } else {
+        // Promote to each platform with appropriate description
+        results = [];
+        for (const platform of videoDetails.platforms) {
+          const platformVideoData = {
+            ...baseVideoData,
+            description: this.getDescriptionForPlatform(videoDetails.video, platform)
+          };
+          
+          console.log(`📝 Using ${platform === 'reddit' ? 'markdown' : 'clean'} description for ${platform}`);
+          
+          const platformManager = new PromotionManager({
+            headless: false,
+            enabledPlatforms: [platform]
+          });
+          
+          const platformResults = await platformManager.promoteVideo(platformVideoData);
+          results.push(...platformResults);
+        }
+      }
 
       // Display results
       console.log('\n📊 Promotion Results:');
@@ -295,12 +434,13 @@ class LocalVideoPromoter {
       }
 
       const videoDetails = {
-        title: options.title || this.extractTitleFromFilename(video.filename),
+        title: options.title || video.title || this.extractTitleFromFilename(video.filename),
         url: youtubeUrl,
-        description: options.description || '',
+        description: options.description, // Use provided description or let platform-specific logic handle it
         tags: options.tags || ['review', 'product', 'amazon'],
         platforms: options.platforms || ['reddit', 'pinterest', 'twitter'],
-        thumbnailPath: video.thumbnailPath
+        thumbnailPath: video.thumbnailPath,
+        video // Pass video object for platform-specific descriptions
       };
 
       console.log(`🚀 Quick promoting: ${video.filename}`);

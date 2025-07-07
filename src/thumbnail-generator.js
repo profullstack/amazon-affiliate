@@ -235,6 +235,114 @@ export class ThumbnailGenerator {
   }
 }
 
+/**
+ * Create a thumbnail from product data (for use in main video creation flow)
+ * @param {Object} productData - Product data containing images and title
+ * @param {string} outputPath - Path where thumbnail should be saved
+ * @returns {Promise<string>} - Path to created thumbnail
+ */
+export const createThumbnail = async (productData, outputPath) => {
+  try {
+    // Look for existing downloaded images in temp directory first
+    const tempDir = './temp';
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    let sourceImagePath = null;
+    
+    // Try to find an existing downloaded image
+    const possibleImages = [
+      path.join(tempDir, 'image-1.jpg'),
+      path.join(tempDir, 'image-2.jpg'),
+      path.join(tempDir, 'image-3.jpg'),
+      path.join(tempDir, 'thumbnail-product-image.jpg'),
+      path.join(tempDir, 'test-image.png'),
+      path.join(tempDir, 'test-image-1.png')
+    ];
+    
+    for (const imagePath of possibleImages) {
+      try {
+        await fs.access(imagePath);
+        sourceImagePath = imagePath;
+        console.log(`📸 Using existing image for thumbnail: ${imagePath}`);
+        break;
+      } catch {
+        // Image doesn't exist, continue
+      }
+    }
+    
+    // If no existing image found, try to download from product data
+    if (!sourceImagePath) {
+      if (!productData.images || productData.images.length === 0) {
+        throw new Error('No product images available for thumbnail creation');
+      }
+
+      const firstImageUrl = productData.images[0];
+      const tempImagePath = path.join(tempDir, 'temp-thumbnail-source.jpg');
+      
+      console.log(`📥 Downloading image for thumbnail: ${firstImageUrl}`);
+      
+      // Download the image using Node.js https/http
+      const { default: https } = await import('https');
+      const { default: http } = await import('http');
+      
+      const client = firstImageUrl.startsWith('https:') ? https : http;
+      
+      await new Promise((resolve, reject) => {
+        const request = client.get(firstImageUrl, (response) => {
+          if (response.statusCode !== 200) {
+            reject(new Error(`Failed to download image: ${response.statusCode} ${response.statusMessage}`));
+            return;
+          }
+          
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', async () => {
+            try {
+              const buffer = Buffer.concat(chunks);
+              await fs.writeFile(tempImagePath, buffer);
+              resolve();
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+        
+        request.on('error', reject);
+        request.setTimeout(10000, () => {
+          request.destroy();
+          reject(new Error('Download timeout'));
+        });
+      });
+      
+      sourceImagePath = tempImagePath;
+    }
+    
+    // Create YouTube-style thumbnail (1280x720)
+    await sharp(sourceImagePath)
+      .resize(1280, 720, {
+        fit: 'cover',
+        position: 'center'
+      })
+      .jpeg({ quality: 90 })
+      .toFile(outputPath);
+    
+    // Only cleanup temp image if we downloaded it (not if we used existing)
+    if (sourceImagePath.includes('temp-thumbnail-source.jpg')) {
+      try {
+        await fs.unlink(sourceImagePath);
+      } catch (error) {
+        console.warn(`⚠️ Failed to cleanup temp image: ${error.message}`);
+      }
+    }
+    
+    return outputPath;
+    
+  } catch (error) {
+    console.error(`❌ Failed to create thumbnail: ${error.message}`);
+    throw error;
+  }
+};
+
 // CLI interface
 async function runCLI() {
   const generator = new ThumbnailGenerator();

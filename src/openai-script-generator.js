@@ -400,7 +400,349 @@ export const getAvailableModels = () => {
 export const getAvailableStyles = () => {
   return [
     'conversational',
-    'professional', 
+    'professional',
     'enthusiastic'
   ];
+};
+
+/**
+ * Generates an optimized YouTube video title using OpenAI
+ * @param {Object} productData - Product information from Amazon scraper
+ * @param {Object} options - Generation options
+ * @returns {Promise<string>} Generated optimized title
+ */
+export const generateAIVideoTitle = async (productData, options = {}) => {
+  if (!productData || typeof productData !== 'object') {
+    throw new Error('Product data is required and must be an object');
+  }
+
+  const {
+    model = 'gpt-4o-mini',
+    maxTokens = 100,
+    temperature = 0.8
+  } = options;
+
+  const {
+    title = 'this product',
+    price = 'a competitive price',
+    rating = 'highly rated',
+    reviewCount = 'many reviews',
+    features = [],
+    description = ''
+  } = productData;
+
+  console.log('🎬 Generating AI-optimized video title...');
+  console.log(`📝 Original product: ${title}`);
+
+  try {
+    const openai = createOpenAIClient();
+
+    const prompt = `Create an engaging, SEO-optimized YouTube video title for this Amazon product review. The title should be clickable, informative, and under 60 characters for optimal display.
+
+PRODUCT DETAILS:
+- Product Name: ${title}
+- Price: ${price}
+- Rating: ${rating} stars (${reviewCount} reviews)
+- Key Features: ${Array.isArray(features) ? features.slice(0, 3).join(', ') : 'Not specified'}
+
+TITLE REQUIREMENTS:
+1. Must be under 60 characters for full mobile display
+2. Include the main product name or category
+3. Add compelling words like "Review", "Worth It?", "Honest Opinion", "Before You Buy"
+4. Make it clickable and curiosity-driven
+5. Avoid clickbait - be honest and informative
+6. Consider SEO keywords that people might search for
+7. Use title case formatting
+
+EXAMPLES OF GOOD TITLES:
+- "KitchenAid Espresso Machine Review - Worth $1,800?"
+- "Honest Review: Is This $200 Robot Vacuum Any Good?"
+- "Apple AirPods Pro 2 - Should You Upgrade?"
+
+Generate 1 optimized title that balances SEO, engagement, and honesty:`;
+
+    console.log('🔄 Calling OpenAI API for title generation...');
+    
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a YouTube SEO expert who creates compelling, honest video titles that get clicks while maintaining credibility. Focus on creating titles that are informative, engaging, and optimized for search.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: maxTokens,
+      temperature,
+      presence_penalty: 0.2,
+      frequency_penalty: 0.1
+    });
+
+    const generatedTitle = completion.choices[0]?.message?.content?.trim();
+
+    if (!generatedTitle) {
+      throw new Error('OpenAI API returned empty title response');
+    }
+
+    // Clean up the title
+    const cleanTitle = generatedTitle
+      .replace(/^["']|["']$/g, '') // Remove quotes
+      .replace(/^\d+\.\s*/, '') // Remove numbering
+      .trim();
+
+    console.log(`✅ AI title generated: "${cleanTitle}"`);
+    
+    return cleanTitle;
+
+  } catch (error) {
+    console.error('❌ OpenAI title generation failed:', error.message);
+    
+    // Fallback to enhanced original title
+    const fallbackTitle = generateFallbackTitle(productData);
+    console.log(`🔄 Using fallback title: "${fallbackTitle}"`);
+    return fallbackTitle;
+  }
+};
+
+/**
+ * Generates an optimized YouTube video description using OpenAI
+ * @param {Object} productData - Product information from Amazon scraper
+ * @param {string} videoTitle - The video title
+ * @param {Object} options - Generation options
+ * @returns {Promise<string>} Generated optimized description
+ */
+export const generateAIVideoDescription = async (productData, videoTitle, options = {}) => {
+  if (!productData || typeof productData !== 'object') {
+    throw new Error('Product data is required and must be an object');
+  }
+
+  const {
+    model = 'gpt-4o-mini',
+    maxTokens = 600,
+    temperature = 0.7,
+    includeTimestamps = true,
+    includeHashtags = true
+  } = options;
+
+  const {
+    title = 'this product',
+    price = 'a competitive price',
+    rating = 'highly rated',
+    reviewCount = 'many reviews',
+    features = [],
+    description = '',
+    amazonUrl = ''
+  } = productData;
+
+  console.log('📝 Generating AI-optimized video description...');
+
+  try {
+    const openai = createOpenAIClient();
+
+    const prompt = `Create an engaging, SEO-optimized YouTube video description for this Amazon product review video.
+
+VIDEO TITLE: ${videoTitle}
+
+PRODUCT DETAILS:
+- Product Name: ${title}
+- Price: ${price}
+- Rating: ${rating} stars (${reviewCount} reviews)
+- Amazon URL: ${amazonUrl}
+- Key Features: ${Array.isArray(features) ? features.slice(0, 5).join(', ') : 'Not specified'}
+- Description: ${processProductDescription(description).substring(0, 500)}
+
+DESCRIPTION REQUIREMENTS:
+1. Start with a compelling hook that matches the video title
+2. Provide a brief overview of what viewers will learn
+3. Include key product details and features
+4. Mention the price and value proposition
+5. Reference customer ratings and feedback
+6. Include a call-to-action for engagement
+7. Add relevant keywords naturally for SEO
+8. Keep it informative but engaging
+9. Include disclaimer about affiliate links if applicable
+10. End with social media engagement request
+
+STRUCTURE:
+- Opening hook (2-3 sentences)
+- What's covered in the video (2-3 sentences)
+- Key product highlights (3-4 sentences)
+- Price and value discussion (1-2 sentences)
+- Call to action (1-2 sentences)
+- Engagement request (1 sentence)
+
+Generate a comprehensive description (aim for 200-300 words):`;
+
+    console.log('🔄 Calling OpenAI API for description generation...');
+    
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a YouTube content strategist who creates compelling video descriptions that improve SEO, engagement, and viewer retention. Focus on being informative, engaging, and optimized for search while maintaining authenticity.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: maxTokens,
+      temperature,
+      presence_penalty: 0.1,
+      frequency_penalty: 0.1
+    });
+
+    let generatedDescription = completion.choices[0]?.message?.content?.trim();
+
+    if (!generatedDescription) {
+      throw new Error('OpenAI API returned empty description response');
+    }
+
+    // Post-process the description
+    generatedDescription = postProcessDescription(generatedDescription, productData, {
+      includeTimestamps,
+      includeHashtags
+    });
+
+    console.log(`✅ AI description generated (${generatedDescription.length} characters)`);
+    
+    return generatedDescription;
+
+  } catch (error) {
+    console.error('❌ OpenAI description generation failed:', error.message);
+    
+    // Fallback to enhanced description
+    const fallbackDescription = generateFallbackDescription(productData, videoTitle);
+    console.log(`🔄 Using fallback description (${fallbackDescription.length} characters)`);
+    return fallbackDescription;
+  }
+};
+
+/**
+ * Generates a fallback title when OpenAI is unavailable
+ * @param {Object} productData - Product information
+ * @returns {string} Fallback title
+ */
+const generateFallbackTitle = (productData) => {
+  const { title = 'Product', price = '' } = productData || {};
+  
+  // Extract main product name (first few words)
+  const productName = title.split(' ').slice(0, 3).join(' ');
+  
+  const titleTemplates = [
+    `${productName} Review - Worth It?`,
+    `${productName} - Honest Review`,
+    `${productName} Review - Before You Buy`,
+    `Is the ${productName} Worth ${price}?`,
+    `${productName} - My Honest Opinion`
+  ];
+  
+  const selectedTemplate = titleTemplates[Math.floor(Math.random() * titleTemplates.length)];
+  
+  // Ensure under 60 characters
+  return selectedTemplate.length > 60
+    ? selectedTemplate.substring(0, 57) + '...'
+    : selectedTemplate;
+};
+
+/**
+ * Generates a fallback description when OpenAI is unavailable
+ * @param {Object} productData - Product information
+ * @param {string} videoTitle - Video title
+ * @returns {string} Fallback description
+ */
+const generateFallbackDescription = (productData, videoTitle) => {
+  const {
+    title = 'this product',
+    price = 'a competitive price',
+    rating = 'highly rated',
+    reviewCount = 'many reviews',
+    features = []
+  } = productData || {};
+
+  const featuresText = Array.isArray(features) && features.length > 0
+    ? features.slice(0, 3).join(', ')
+    : 'various useful features';
+
+  return `In this video, I'm reviewing the ${title} to help you decide if it's worth your money.
+
+I'll cover the key features including ${featuresText}, discuss the current price of ${price}, and share my honest thoughts based on the ${rating} star rating from ${reviewCount} customer reviews.
+
+Whether you're considering this purchase or just curious about the product, this review will give you all the information you need to make an informed decision.
+
+⏰ Timestamps:
+0:00 Introduction
+0:30 Product Overview
+1:00 Key Features
+1:30 Price & Value
+2:00 Final Thoughts
+
+👍 If this review was helpful, please like and subscribe for more honest product reviews!
+
+#ProductReview #Amazon #Review`;
+};
+
+/**
+ * Post-processes the generated description
+ * @param {string} description - Raw generated description
+ * @param {Object} productData - Product data
+ * @param {Object} options - Processing options
+ * @returns {string} Processed description
+ */
+const postProcessDescription = (description, productData, options = {}) => {
+  let processed = description;
+  
+  const { includeTimestamps = true, includeHashtags = true } = options;
+  
+  // Add timestamps if not present and requested
+  if (includeTimestamps && !processed.includes('0:00')) {
+    processed += '\n\n⏰ Timestamps:\n0:00 Introduction\n0:30 Product Overview\n1:00 Key Features\n1:30 Price & Value\n2:00 Final Thoughts';
+  }
+  
+  // Add engagement call-to-action if not present
+  if (!processed.toLowerCase().includes('like') && !processed.toLowerCase().includes('subscribe')) {
+    processed += '\n\n👍 If this review was helpful, please like and subscribe for more honest product reviews!';
+  }
+  
+  // Add relevant hashtags if requested
+  if (includeHashtags && !processed.includes('#')) {
+    const productCategory = extractProductCategory(productData.title || '');
+    processed += `\n\n#ProductReview #Amazon #Review #${productCategory}`;
+  }
+  
+  // Clean up formatting
+  processed = processed.replace(/\n{3,}/g, '\n\n'); // Max 2 consecutive newlines
+  processed = processed.trim();
+  
+  return processed;
+};
+
+/**
+ * Extracts product category for hashtags
+ * @param {string} title - Product title
+ * @returns {string} Product category
+ */
+const extractProductCategory = (title) => {
+  const categories = {
+    'kitchen': ['kitchen', 'espresso', 'coffee', 'blender', 'mixer', 'cookware'],
+    'electronics': ['phone', 'laptop', 'tablet', 'headphones', 'speaker', 'camera'],
+    'home': ['vacuum', 'air purifier', 'humidifier', 'lamp', 'furniture'],
+    'fitness': ['treadmill', 'weights', 'yoga', 'exercise', 'fitness'],
+    'beauty': ['skincare', 'makeup', 'hair', 'beauty', 'cosmetic'],
+    'automotive': ['car', 'auto', 'vehicle', 'tire', 'automotive']
+  };
+  
+  const lowerTitle = title.toLowerCase();
+  
+  for (const [category, keywords] of Object.entries(categories)) {
+    if (keywords.some(keyword => lowerTitle.includes(keyword))) {
+      return category.charAt(0).toUpperCase() + category.slice(1);
+    }
+  }
+  
+  return 'Product';
 };

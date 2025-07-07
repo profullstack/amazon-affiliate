@@ -249,9 +249,9 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
     // Parse resolution to get width and height
     const [width, height] = resolution.split('x').map(Number);
     
-    // Scale and pad each image, ensuring consistent timing
+    // Scale and pad each image, ensuring consistent timing and SAR
     for (let i = 0; i < absoluteImagePaths.length; i++) {
-      filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
+      filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
     }
     
     // Concatenate all scaled images with precise timing
