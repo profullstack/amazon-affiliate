@@ -25,25 +25,54 @@ const DEFAULT_OPTIONS = {
 };
 
 /**
- * Validates Amazon product URL
- * @param {string} url - URL to validate
- * @throws {Error} When URL is invalid
+ * Validates and normalizes Amazon product URL or product ID
+ * @param {string} input - URL or product ID to validate
+ * @returns {string} - Normalized Amazon URL
+ * @throws {Error} When input is invalid
  */
-const validateAmazonUrl = url => {
-  if (!url || typeof url !== 'string') {
-    throw new Error('Amazon product URL is required');
+const validateAndNormalizeAmazonUrl = input => {
+  if (!input || typeof input !== 'string') {
+    throw new Error('Amazon product URL or product ID is required');
   }
 
-  try {
-    const urlObj = new URL(url);
-    if (!urlObj.hostname.includes('amazon.') || 
-        (!url.includes('/dp/') && !url.includes('/gp/product/'))) {
+  const trimmedInput = input.trim();
+
+  // Check if it's already a full URL
+  if (trimmedInput.startsWith('http')) {
+    try {
+      const urlObj = new URL(trimmedInput);
+      if (!urlObj.hostname.includes('amazon.') ||
+          (!trimmedInput.includes('/dp/') && !trimmedInput.includes('/gp/product/'))) {
+        throw new Error('Invalid Amazon URL format');
+      }
+      return trimmedInput;
+    } catch {
       throw new Error('Invalid Amazon URL format');
     }
-  } catch {
-    throw new Error('Invalid Amazon URL format');
   }
+
+  // Check if it's a product ID (ASIN format: typically 10 characters, alphanumeric)
+  const productIdPattern = /^[A-Z0-9]{10}$/;
+  if (productIdPattern.test(trimmedInput)) {
+    // Convert product ID to full Amazon URL
+    const amazonUrl = `https://www.amazon.com/dp/${trimmedInput}`;
+    console.log(`📦 Converted product ID "${trimmedInput}" to URL: ${amazonUrl}`);
+    return amazonUrl;
+  }
+
+  // Check for other common ASIN patterns (sometimes shorter or with different characters)
+  const flexibleProductIdPattern = /^[A-Z0-9]{8,12}$/;
+  if (flexibleProductIdPattern.test(trimmedInput)) {
+    const amazonUrl = `https://www.amazon.com/dp/${trimmedInput}`;
+    console.log(`📦 Converted product ID "${trimmedInput}" to URL: ${amazonUrl}`);
+    return amazonUrl;
+  }
+
+  throw new Error('Invalid input. Please provide either a full Amazon URL or a valid product ID (e.g., B0CPZKLJX1)');
 };
+
+// Export for testing
+export { validateAndNormalizeAmazonUrl };
 
 /**
  * Reports progress to callback if provided
@@ -246,21 +275,21 @@ const promptUserConfirmation = async (message, autoConfirm = false) => {
 };
 
 /**
- * Main function to create affiliate video from Amazon product URL
- * @param {string} productUrl - Amazon product URL
+ * Main function to create affiliate video from Amazon product URL or product ID
+ * @param {string} productInput - Amazon product URL or product ID
  * @param {Object} options - Configuration options
  * @returns {Promise<Object>} - Result object with success status and details
  */
-export const createAffiliateVideo = async (productUrl, options = {}) => {
+export const createAffiliateVideo = async (productInput, options = {}) => {
   const config = { ...DEFAULT_OPTIONS, ...options };
   const timings = {};
   let tempFiles = [];
 
   try {
-    // Validate input
-    validateAmazonUrl(productUrl);
+    // Validate and normalize input (convert product ID to URL if needed)
+    const productUrl = validateAndNormalizeAmazonUrl(productInput);
     
-    reportProgress(config.onProgress, 'validation', 5, 'Validating Amazon URL');
+    reportProgress(config.onProgress, 'validation', 5, 'Validating Amazon input');
 
     // Ensure directories exist
     await fs.mkdir(config.tempDir, { recursive: true });
@@ -482,10 +511,24 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
         }
       };
 
+      // Use clean description for YouTube (read from .txt file if available)
+      let youtubeDescription = videoDescription;
+      if (descriptionFilePath) {
+        try {
+          // Read the clean .txt version for YouTube
+          const txtFilePath = descriptionFilePath.replace('.md', '.txt');
+          const txtContent = await fs.readFile(txtFilePath, 'utf-8');
+          const lines = txtContent.split('\n');
+          youtubeDescription = lines.slice(1).join('\n').trim(); // Skip title line
+        } catch (error) {
+          console.warn('⚠️ Could not read clean description file, using original');
+        }
+      }
+
       const uploadResult = await uploadToYouTube(
         finalVideoPath,
         videoTitle,
-        videoDescription,
+        youtubeDescription,
         productUrl,
         uploadOptions
       );
@@ -659,11 +702,17 @@ export const createAffiliateVideo = async (productUrl, options = {}) => {
  * @param {string[]} args - Command line arguments
  */
 export const runCLI = async (args = process.argv.slice(2)) => {
-  if (args.length === 0) {
+  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(`
 🎬 Amazon Affiliate Video Automation
 
-Usage: node src/index.js <amazon-product-url> [options]
+Usage: node src/index.js <amazon-product-url-or-id> [options]
+
+Input:
+  <amazon-product-url-or-id>  Either a full Amazon URL or just the product ID
+                              Examples:
+                                • https://www.amazon.com/dp/B0CPZKLJX1
+                                • B0CPZKLJX1
 
 Options:
   --max-images <number>     Maximum number of images to download (default: 5)
@@ -675,15 +724,20 @@ Options:
   --auto-promote           Automatically promote video on social media after upload
   --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter)
 
-Example:
+Examples:
+  # Using full URL
   node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --quality high --max-images 3
-  node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --auto-upload --auto-promote
-  node src/index.js "https://www.amazon.com/dp/B08N5WRWNW" --promotion-platforms "reddit,twitter"
+  
+  # Using just product ID (much easier!)
+  node src/index.js "B0CPZKLJX1" --auto-upload --auto-promote
+  
+  # Product ID with specific platforms
+  node src/index.js "B08N5WRWNW" --promotion-platforms "reddit,twitter"
     `);
     process.exit(1);
   }
 
-  const productUrl = args[0];
+  const productInput = args[0];
   const options = {};
 
   // Parse command line options
@@ -730,7 +784,7 @@ Example:
   };
 
   try {
-    const result = await createAffiliateVideo(productUrl, options);
+    const result = await createAffiliateVideo(productInput, options);
     
     if (result.success) {
       if (result.youtubeUrl) {
