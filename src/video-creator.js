@@ -544,17 +544,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   const outputDir = path.dirname(absoluteOutputPath);
   await fs.mkdir(outputDir, { recursive: true });
 
-  // Process images with smart backgrounds for better visual quality
-  const [width, height] = resolution.split('x').map(Number);
-  const tempDir = path.dirname(absoluteImagePaths[0]); // Use same temp directory as images
-  
-  console.log('🎨 Processing images with smart backgrounds...');
-  const processedImagePaths = await processImagesWithSmartBackground(
-    absoluteImagePaths,
-    tempDir,
-    width,
-    height
-  );
+  console.log('🎨 Using original images with proper scaling...');
 
   // Get actual audio duration
   let audioDuration;
@@ -582,26 +572,15 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     
     let ffmpegArgs;
     
-    if (processedImagePaths.length === 1) {
-      // Single image - use simple approach
-      // If ImageMagick processed the image, it's already the right size, so minimal scaling needed
-      const needsScaling = processedImagePaths[0] === absoluteImagePaths[0]; // Original image, needs scaling
+    if (absoluteImagePaths.length === 1) {
+      // Single image - use simple approach with proper scaling
+      const [width, height] = resolution.split('x').map(Number);
       
       ffmpegArgs = [
         '-loop', '1',
-        '-i', processedImagePaths[0],
+        '-i', absoluteImagePaths[0],
         '-i', absoluteAudioPath,
-      ];
-      
-      if (needsScaling) {
-        // Original image - needs FFmpeg scaling with black padding
-        ffmpegArgs.push('-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`);
-      } else {
-        // ImageMagick processed - already correct size with smart background
-        ffmpegArgs.push('-vf', `scale=${width}:${height}`); // Just ensure exact dimensions
-      }
-      
-      ffmpegArgs.push(
+        '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
         '-c:v', 'libx264',
         '-c:a', 'aac',
         '-b:a', '128k',
@@ -613,48 +592,39 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-shortest',
         '-y',
         absoluteOutputPath
-      );
+      ];
     } else {
-      // Multiple images - use simplified filter complex
+      // Multiple images - use filter complex with proper scaling
       ffmpegArgs = [];
       
-      // Add each processed image as input with its duration
-      for (let i = 0; i < processedImagePaths.length; i++) {
+      // Add each image as input with its duration
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
         ffmpegArgs.push(
           '-loop', '1',
           '-t', durationPerImage.toString(),
-          '-i', processedImagePaths[i]
+          '-i', absoluteImagePaths[i]
         );
       }
       
       // Add audio input
       ffmpegArgs.push('-i', absoluteAudioPath);
       
-      // Create simplified filter complex
+      // Create filter complex with proper scaling
       let filterComplex = '';
+      const [width, height] = resolution.split('x').map(Number);
       
-      // Check if images were processed by ImageMagick (smart backgrounds)
-      const needsScaling = processedImagePaths[0] === absoluteImagePaths[0];
-      
-      if (needsScaling) {
-        // Original images - need FFmpeg scaling with black padding
-        for (let i = 0; i < processedImagePaths.length; i++) {
-          filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
-        }
-      } else {
-        // ImageMagick processed - already correct size with smart backgrounds
-        for (let i = 0; i < processedImagePaths.length; i++) {
-          filterComplex += `[${i}:v]scale=${width}:${height},setsar=1,fps=${fps}[v${i}];`;
-        }
+      // Scale and pad each image with proper aspect ratio handling
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
+        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
       }
       
       // Concatenate all scaled images
-      filterComplex += processedImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${processedImagePaths.length}:v=1:a=0[outv]`;
+      filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0[outv]`;
       
       ffmpegArgs.push(
         '-filter_complex', filterComplex,
         '-map', '[outv]',
-        '-map', `${processedImagePaths.length}:a:0`,
+        '-map', `${absoluteImagePaths.length}:a:0`,
         '-c:v', 'libx264',
         '-c:a', 'aac',
         '-b:a', '128k',

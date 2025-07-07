@@ -437,6 +437,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           }
         };
 
+        // Use the same images for both videos (the original downloaded images)
+        console.log(`📱 Using original images for short video (same as main video)`);
+        
         shortVideoPath = await createShortVideo(
           imagePaths,
           shortVoiceoverPath,
