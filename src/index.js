@@ -728,9 +728,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         }
       };
       
-      // Cleanup temporary files
+      // Cleanup temporary files (after all video creation is complete)
       if (config.cleanup) {
-        reportProgress(config.onProgress, 'cleanup', 95, 'Cleaning up temporary files');
+        reportProgress(config.onProgress, 'cleanup', 98, 'Cleaning up temporary files');
         await cleanupImages(tempFiles);
         console.log('✅ Temporary files cleaned up');
       }
@@ -769,9 +769,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         }
       };
       
-      // Cleanup temporary files
+      // Cleanup temporary files (after all video creation is complete)
       if (config.cleanup) {
-        reportProgress(config.onProgress, 'cleanup', 95, 'Cleaning up temporary files');
+        reportProgress(config.onProgress, 'cleanup', 98, 'Cleaning up temporary files');
         await cleanupImages(tempFiles);
         console.log('✅ Temporary files cleaned up');
       }

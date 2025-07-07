@@ -2,6 +2,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
+import { createStylishThumbnail, generateThumbnailTitle, isImageMagickAvailable } from './image-processor.js';
 
 /**
  * Utility to generate thumbnails for existing videos that don't have them
@@ -266,6 +267,9 @@ async function createVerticalThumbnail(framePath, outputPath) {
  */
 export const createThumbnail = async (productData, outputPath, options = {}) => {
   try {
+    // Check if ImageMagick is available for stylish thumbnails
+    const magickAvailable = await isImageMagickAvailable();
+    
     // Look for existing downloaded images in temp directory first
     const tempDir = './temp';
     await fs.mkdir(tempDir, { recursive: true });
@@ -340,7 +344,55 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
       sourceImagePath = tempImagePath;
     }
     
-    // Create thumbnail based on format
+    // Generate thumbnail title from product data
+    const thumbnailTitle = generateThumbnailTitle(productData.title || 'Product Review');
+    
+    // Try to create stylish thumbnail with ImageMagick first
+    if (magickAvailable && productData.title) {
+      try {
+        console.log('🎨 Creating stylish thumbnail with text overlay...');
+        
+        const stylishOptions = {
+          width: options.isVertical ? 1080 : 1280,
+          height: options.isVertical ? 1920 : 720,
+          fontSize: options.isVertical ? 64 : 72,
+          position: 'bottom',
+          fontFamily: 'Adwaita-Sans-Black',
+          textColor: 'white',
+          strokeColor: 'black',
+          strokeWidth: 3,
+          shadowOffset: 5,
+          shadowBlur: 10,
+          shadowOpacity: 0.8
+        };
+        
+        const result = await createStylishThumbnail(
+          sourceImagePath,
+          thumbnailTitle,
+          outputPath,
+          stylishOptions
+        );
+        
+        // Only cleanup temp image if we downloaded it (not if we used existing)
+        if (sourceImagePath.includes('temp-thumbnail-source.jpg')) {
+          try {
+            await fs.unlink(sourceImagePath);
+          } catch (error) {
+            console.warn(`⚠️ Failed to cleanup temp image: ${error.message}`);
+          }
+        }
+        
+        return result;
+        
+      } catch (error) {
+        console.warn(`⚠️ Stylish thumbnail creation failed: ${error.message}`);
+        console.log('📝 Falling back to basic thumbnail...');
+      }
+    }
+    
+    // Fallback to basic thumbnail creation with Sharp
+    console.log('📸 Creating basic thumbnail...');
+    
     if (options.isVertical) {
       // Create vertical thumbnail for short videos (1080x1920)
       await sharp(sourceImagePath)

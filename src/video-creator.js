@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
+import { processImagesWithSmartBackground } from './image-processor.js';
 
 /**
  * Creates a simple video from a single image and audio using direct FFmpeg execution
@@ -543,6 +544,18 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   const outputDir = path.dirname(absoluteOutputPath);
   await fs.mkdir(outputDir, { recursive: true });
 
+  // Process images with smart backgrounds for better visual quality
+  const [width, height] = resolution.split('x').map(Number);
+  const tempDir = path.dirname(absoluteImagePaths[0]); // Use same temp directory as images
+  
+  console.log('🎨 Processing images with smart backgrounds...');
+  const processedImagePaths = await processImagesWithSmartBackground(
+    absoluteImagePaths,
+    tempDir,
+    width,
+    height
+  );
+
   // Get actual audio duration
   let audioDuration;
   try {
@@ -564,52 +577,96 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
 
   return new Promise((resolve, reject) => {
-    // Build FFmpeg command for short video with vertical format
-    const ffmpegArgs = [];
+    // For short videos, use a simpler approach that's more reliable
+    // If we have multiple images, create a slideshow; if just one, use it directly
     
-    // Add each image as input with its duration
-    for (let i = 0; i < absoluteImagePaths.length; i++) {
-      ffmpegArgs.push(
+    let ffmpegArgs;
+    
+    if (processedImagePaths.length === 1) {
+      // Single image - use simple approach
+      // If ImageMagick processed the image, it's already the right size, so minimal scaling needed
+      const needsScaling = processedImagePaths[0] === absoluteImagePaths[0]; // Original image, needs scaling
+      
+      ffmpegArgs = [
         '-loop', '1',
-        '-t', durationPerImage.toString(),
-        '-i', absoluteImagePaths[i]
+        '-i', processedImagePaths[0],
+        '-i', absoluteAudioPath,
+      ];
+      
+      if (needsScaling) {
+        // Original image - needs FFmpeg scaling with black padding
+        ffmpegArgs.push('-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`);
+      } else {
+        // ImageMagick processed - already correct size with smart background
+        ffmpegArgs.push('-vf', `scale=${width}:${height}`); // Just ensure exact dimensions
+      }
+      
+      ffmpegArgs.push(
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
+        '-ac', '2',
+        '-pix_fmt', 'yuv420p',
+        '-crf', crfValue.toString(),
+        '-r', fps.toString(),
+        '-shortest',
+        '-y',
+        absoluteOutputPath
+      );
+    } else {
+      // Multiple images - use simplified filter complex
+      ffmpegArgs = [];
+      
+      // Add each processed image as input with its duration
+      for (let i = 0; i < processedImagePaths.length; i++) {
+        ffmpegArgs.push(
+          '-loop', '1',
+          '-t', durationPerImage.toString(),
+          '-i', processedImagePaths[i]
+        );
+      }
+      
+      // Add audio input
+      ffmpegArgs.push('-i', absoluteAudioPath);
+      
+      // Create simplified filter complex
+      let filterComplex = '';
+      
+      // Check if images were processed by ImageMagick (smart backgrounds)
+      const needsScaling = processedImagePaths[0] === absoluteImagePaths[0];
+      
+      if (needsScaling) {
+        // Original images - need FFmpeg scaling with black padding
+        for (let i = 0; i < processedImagePaths.length; i++) {
+          filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
+        }
+      } else {
+        // ImageMagick processed - already correct size with smart backgrounds
+        for (let i = 0; i < processedImagePaths.length; i++) {
+          filterComplex += `[${i}:v]scale=${width}:${height},setsar=1,fps=${fps}[v${i}];`;
+        }
+      }
+      
+      // Concatenate all scaled images
+      filterComplex += processedImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${processedImagePaths.length}:v=1:a=0[outv]`;
+      
+      ffmpegArgs.push(
+        '-filter_complex', filterComplex,
+        '-map', '[outv]',
+        '-map', `${processedImagePaths.length}:a:0`,
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '44100',
+        '-ac', '2',
+        '-pix_fmt', 'yuv420p',
+        '-crf', crfValue.toString(),
+        '-shortest',
+        '-y',
+        absoluteOutputPath
       );
     }
-    
-    // Add audio input (will be trimmed to 30 seconds)
-    ffmpegArgs.push('-i', absoluteAudioPath);
-    
-    // Create filter complex for concatenating images with vertical format
-    let filterComplex = '';
-    // Parse resolution to get width and height
-    const [width, height] = resolution.split('x').map(Number);
-    
-    // Scale and pad each image for vertical format, ensuring consistent timing
-    for (let i = 0; i < absoluteImagePaths.length; i++) {
-      filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
-    }
-    
-    // Concatenate all scaled images (no audio trimming - use full duration)
-    filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0,fps=${fps}[outv]`;
-    
-    ffmpegArgs.push(
-      '-filter_complex', filterComplex,
-      '-map', '[outv]',
-      '-map', `${absoluteImagePaths.length}:a:0`,
-      '-c:v', 'libx264',
-      '-c:a', 'aac',
-      '-b:a', '128k',           // Fixed audio bitrate for consistency
-      '-ar', '44100',           // Fixed sample rate
-      '-ac', '2',               // Stereo audio
-      '-pix_fmt', 'yuv420p',
-      '-crf', crfValue.toString(),
-      '-r', fps.toString(),
-      '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
-      '-fflags', '+genpts',     // Generate presentation timestamps
-      '-shortest',              // Use shortest stream (audio) to determine duration
-      '-y',
-      absoluteOutputPath
-    );
 
     console.log('🎥 FFmpeg short video command: ffmpeg', ffmpegArgs.join(' '));
 
