@@ -746,3 +746,145 @@ const extractProductCategory = (title) => {
   
   return 'Product';
 };
+
+/**
+ * Generates a short (~30 second) script specifically for social media short videos
+ * @param {Object} productData - Product information from Amazon scraper
+ * @param {Object} options - Generation options
+ * @returns {Promise<string>} Generated short video script
+ */
+export const generateAIShortVideoScript = async (productData, options = {}) => {
+  if (!productData || typeof productData !== 'object') {
+    throw new Error('Product data is required and must be an object');
+  }
+
+  const {
+    model = 'gpt-4o-mini',
+    maxTokens = 200,
+    temperature = 0.8,
+    targetDuration = 30
+  } = options;
+
+  const {
+    title = 'this product',
+    price = 'a competitive price',
+    rating = 'highly rated',
+    reviewCount = 'many reviews',
+    features = [],
+    description = ''
+  } = productData;
+
+  console.log('📱 Generating AI-powered short video script...');
+  console.log(`📝 Product: ${title}`);
+  console.log(`⏱️ Target duration: ~${targetDuration} seconds`);
+
+  try {
+    const openai = createOpenAIClient();
+
+    const prompt = `Create a punchy, engaging script for a ${targetDuration}-second short video (Instagram Reels, TikTok, YouTube Shorts) reviewing this Amazon product.
+
+PRODUCT DETAILS:
+- Product Name: ${title}
+- Price: ${price}
+- Rating: ${rating} stars (${reviewCount} reviews)
+- Key Features: ${Array.isArray(features) ? features.slice(0, 3).join(', ') : 'Not specified'}
+- Description: ${processProductDescription(description).substring(0, 300)}
+
+SHORT VIDEO SCRIPT REQUIREMENTS:
+1. HOOK (0-3 seconds): Start with an attention-grabbing opener
+2. QUICK OVERVIEW (3-15 seconds): Briefly explain what the product is and why it matters
+3. KEY HIGHLIGHT (15-25 seconds): Focus on 1-2 most compelling features or benefits
+4. CALL TO ACTION (25-30 seconds): Quick recommendation and engagement request
+
+STYLE GUIDELINES:
+- Write ONLY in English - no foreign words or phrases
+- Keep it fast-paced and energetic for social media
+- Use short, punchy sentences
+- Include natural pauses marked with "..."
+- Make it conversational and authentic
+- Focus on the most compelling selling points
+- Target exactly ${targetDuration} seconds of speaking time (~75-90 words)
+- Use "I" statements to make it personal
+- End with a clear call-to-action
+
+TONE: Energetic, authentic, and helpful - like you're excitedly telling a friend about a great find.
+
+Generate a script that will keep viewers engaged for the full ${targetDuration} seconds:`;
+
+    console.log('🔄 Calling OpenAI API for short video script...');
+    
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a social media content creator who specializes in creating engaging, fast-paced product review scripts for short-form video platforms like TikTok, Instagram Reels, and YouTube Shorts. Your scripts are punchy, authentic, and designed to hold attention for the full duration while providing genuine value.`
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: maxTokens,
+      temperature,
+      presence_penalty: 0.2,
+      frequency_penalty: 0.1
+    });
+
+    const generatedScript = completion.choices[0]?.message?.content;
+
+    if (!generatedScript) {
+      throw new Error('OpenAI API returned empty short video script response');
+    }
+
+    console.log(`✅ AI short video script generated (${generatedScript.length} characters)`);
+    
+    // Post-process the script for better speech synthesis
+    const processedScript = postProcessShortScript(generatedScript);
+    
+    // Estimate duration and log it
+    const estimatedDuration = estimateScriptDuration(processedScript);
+    console.log(`⏱️ Estimated speaking duration: ${estimatedDuration} seconds`);
+    
+    return processedScript;
+
+  } catch (error) {
+    console.error('❌ OpenAI short video script generation failed:', error.message);
+    console.error('📋 Error details:', error);
+    
+    // No fallback - throw the error so you can see exactly what's wrong
+    throw new Error(`OpenAI short video script generation failed: ${error.message}`);
+  }
+};
+
+/**
+ * Post-processes the generated short video script for better speech synthesis
+ * @param {string} script - Raw generated short script
+ * @returns {string} Processed short script
+ */
+const postProcessShortScript = (script) => {
+  let processed = script;
+
+  // Remove any markdown formatting
+  processed = processed.replace(/\*\*(.*?)\*\*/g, '$1');
+  processed = processed.replace(/\*(.*?)\*/g, '$1');
+  
+  // Ensure proper sentence spacing
+  processed = processed.replace(/\.\s+/g, '. ');
+  processed = processed.replace(/\?\s+/g, '? ');
+  processed = processed.replace(/!\s+/g, '! ');
+  
+  // Add natural pauses for better speech flow (shorter pauses for fast-paced content)
+  processed = processed.replace(/\. ([A-Z])/g, '. .. $1');
+  processed = processed.replace(/\? ([A-Z])/g, '? .. $1');
+  processed = processed.replace(/! ([A-Z])/g, '! .. $1');
+  
+  // Emphasize important elements for speech synthesis
+  processed = processed.replace(/(\$\d+(?:\.\d{2})?)/g, '*$1*');
+  processed = processed.replace(/(\d+(?:\.\d+)?\s*(?:star|stars))/gi, '*$1*');
+  
+  // Clean up any double spaces
+  processed = processed.replace(/\s+/g, ' ').trim();
+  
+  return processed;
+};

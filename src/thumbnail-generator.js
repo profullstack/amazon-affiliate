@@ -236,12 +236,35 @@ export class ThumbnailGenerator {
 }
 
 /**
+ * Create a vertical thumbnail for short videos (1080x1920)
+ */
+async function createVerticalThumbnail(framePath, outputPath) {
+  try {
+    await sharp(framePath)
+      .resize(1080, 1920, {
+        fit: 'cover',
+        position: 'center'
+      })
+      .jpeg({ quality: 90 })
+      .toFile(outputPath);
+    
+    console.log(`✅ Vertical thumbnail created: ${outputPath}`);
+    return outputPath;
+  } catch (error) {
+    console.error(`❌ Failed to create vertical thumbnail: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
  * Create a thumbnail from product data (for use in main video creation flow)
  * @param {Object} productData - Product data containing images and title
  * @param {string} outputPath - Path where thumbnail should be saved
+ * @param {Object} options - Options for thumbnail creation
+ * @param {boolean} options.isVertical - Whether to create vertical format (1080x1920) for short videos
  * @returns {Promise<string>} - Path to created thumbnail
  */
-export const createThumbnail = async (productData, outputPath) => {
+export const createThumbnail = async (productData, outputPath, options = {}) => {
   try {
     // Look for existing downloaded images in temp directory first
     const tempDir = './temp';
@@ -317,14 +340,28 @@ export const createThumbnail = async (productData, outputPath) => {
       sourceImagePath = tempImagePath;
     }
     
-    // Create YouTube-style thumbnail (1280x720)
-    await sharp(sourceImagePath)
-      .resize(1280, 720, {
-        fit: 'cover',
-        position: 'center'
-      })
-      .jpeg({ quality: 90 })
-      .toFile(outputPath);
+    // Create thumbnail based on format
+    if (options.isVertical) {
+      // Create vertical thumbnail for short videos (1080x1920)
+      await sharp(sourceImagePath)
+        .resize(1080, 1920, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .jpeg({ quality: 90 })
+        .toFile(outputPath);
+      console.log(`✅ Vertical thumbnail created: ${outputPath}`);
+    } else {
+      // Create YouTube-style thumbnail (1280x720)
+      await sharp(sourceImagePath)
+        .resize(1280, 720, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .jpeg({ quality: 90 })
+        .toFile(outputPath);
+      console.log(`✅ YouTube thumbnail created: ${outputPath}`);
+    }
     
     // Only cleanup temp image if we downloaded it (not if we used existing)
     if (sourceImagePath.includes('temp-thumbnail-source.jpg')) {

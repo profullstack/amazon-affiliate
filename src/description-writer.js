@@ -84,11 +84,11 @@ export const generateDescriptionFilename = (videoTitle) => {
  * @param {string} description - Video description content
  * @param {string} videoTitle - Video title (used for filename generation)
  * @param {string} outputDir - Output directory path
- * @param {string} [customFilename] - Optional custom filename (with .txt extension)
+ * @param {string|Object} [customFilenameOrOptions] - Optional custom filename (with .txt extension) or options object
  * @returns {Promise<Object>} - Result object with file path, filename, and stats
  * @throws {Error} When parameters are invalid or file operation fails
  */
-export const writeVideoDescription = async (description, videoTitle, outputDir, customFilename = null) => {
+export const writeVideoDescription = async (description, videoTitle, outputDir, customFilenameOrOptions = null) => {
   // Validate inputs
   if (description === null || description === undefined) {
     throw new Error('Description is required');
@@ -102,6 +102,23 @@ export const writeVideoDescription = async (description, videoTitle, outputDir, 
     throw new Error('Output directory is required');
   }
 
+  // Parse options parameter
+  let customFilename = null;
+  let options = {};
+  
+  if (typeof customFilenameOrOptions === 'string') {
+    // Legacy support: string parameter is treated as custom filename
+    customFilename = customFilenameOrOptions;
+  } else if (typeof customFilenameOrOptions === 'object' && customFilenameOrOptions !== null) {
+    // New options object
+    options = customFilenameOrOptions;
+    customFilename = options.customFilename || null;
+  }
+
+  // Extract options
+  const filenameSuffix = options.filenameSuffix || '';
+  const isShortVideo = options.isShortVideo || false;
+
   // Convert description to string
   const rawDescriptionText = String(description);
   const cleanDescriptionText = cleanMarkdownFormatting(rawDescriptionText);
@@ -111,9 +128,17 @@ export const writeVideoDescription = async (description, videoTitle, outputDir, 
     await fs.mkdir(outputDir, { recursive: true });
 
     // Generate base filename (without extension)
-    const baseFilename = customFilename
-      ? path.parse(customFilename).name
-      : path.parse(generateDescriptionFilename(videoTitle)).name;
+    let baseFilename;
+    if (customFilename) {
+      baseFilename = path.parse(customFilename).name;
+    } else {
+      baseFilename = path.parse(generateDescriptionFilename(videoTitle)).name;
+    }
+    
+    // Add suffix if provided
+    if (filenameSuffix) {
+      baseFilename += filenameSuffix;
+    }
 
     // Create both .txt (clean) and .md (original) files
     const txtFilename = `${baseFilename}.txt`;
@@ -137,7 +162,8 @@ export const writeVideoDescription = async (description, videoTitle, outputDir, 
     // Get file stats for the main .txt file
     const stats = await fs.stat(txtFilePath);
 
-    console.log(`📝 Video description saved:`);
+    const videoType = isShortVideo ? 'Short video' : 'Video';
+    console.log(`📝 ${videoType} description saved:`);
     console.log(`   📄 Clean version (YouTube): ${txtFilePath}`);
     console.log(`   📝 Markdown version (Reddit): ${mdFilePath}`);
 

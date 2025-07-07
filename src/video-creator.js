@@ -484,3 +484,184 @@ export async function getVideoInfo(videoPath) {
     });
   });
 }
+
+/**
+ * Creates a short video for social media (Instagram Reels, TikTok, YouTube Shorts)
+ * Uses the full audio duration but optimized for short-form content
+ * @param {string[]} imagePaths - Array of image file paths
+ * @param {string} audioPath - Path to audio file
+ * @param {string} outputPath - Path for output video
+ * @param {Object} options - Video creation options
+ * @returns {Promise<string>} Path to created short video
+ */
+export async function createShortVideo(imagePaths, audioPath, outputPath, options = {}) {
+  if (!imagePaths || imagePaths.length === 0) {
+    throw new Error('At least one image is required');
+  }
+
+  const {
+    resolution = '1080x1920',      // Vertical format for mobile (9:16 aspect ratio)
+    fps = 30,                      // High fps for smooth playback
+    quality = 'high'               // High quality for social media
+  } = options;
+
+  // Convert quality string to numeric CRF value
+  let crfValue = 23; // default
+  if (typeof quality === 'string') {
+    const qualityMap = {
+      'low': 28,
+      'medium': 23,
+      'high': 18,
+      'ultra': 15
+    };
+    crfValue = qualityMap[quality] || 23;
+  } else if (typeof quality === 'number') {
+    crfValue = quality;
+  }
+
+  // Convert to absolute paths
+  const absoluteImagePaths = imagePaths.map(p => path.resolve(p));
+  const absoluteAudioPath = path.resolve(audioPath);
+  const absoluteOutputPath = path.resolve(outputPath);
+
+  // Check if files exist
+  for (const imagePath of absoluteImagePaths) {
+    try {
+      await fs.access(imagePath);
+    } catch (error) {
+      throw new Error(`Image file not found: ${imagePath}`);
+    }
+  }
+
+  try {
+    await fs.access(absoluteAudioPath);
+  } catch (error) {
+    throw new Error(`Audio file not found: ${absoluteAudioPath}`);
+  }
+
+  // Ensure output directory exists
+  const outputDir = path.dirname(absoluteOutputPath);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Get actual audio duration
+  let audioDuration;
+  try {
+    audioDuration = await getAudioDuration(absoluteAudioPath);
+    console.log(`🎵 Audio duration: ${audioDuration.toFixed(2)}s`);
+  } catch (error) {
+    console.warn('⚠️ Could not get audio duration, using 30s default');
+    audioDuration = 30;
+  }
+
+  console.log(`📱 Creating ${audioDuration.toFixed(1)}s short video from ${imagePaths.length} images...`);
+  console.log(`📁 Images: ${absoluteImagePaths.join(', ')}`);
+  console.log(`🎵 Audio: ${absoluteAudioPath}`);
+  console.log(`📹 Output: ${absoluteOutputPath}`);
+  console.log(`📐 Resolution: ${resolution} (vertical format for mobile)`);
+
+  // Calculate duration per image for the short video
+  const durationPerImage = audioDuration / imagePaths.length;
+  console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
+
+  return new Promise((resolve, reject) => {
+    // Build FFmpeg command for short video with vertical format
+    const ffmpegArgs = [];
+    
+    // Add each image as input with its duration
+    for (let i = 0; i < absoluteImagePaths.length; i++) {
+      ffmpegArgs.push(
+        '-loop', '1',
+        '-t', durationPerImage.toString(),
+        '-i', absoluteImagePaths[i]
+      );
+    }
+    
+    // Add audio input (will be trimmed to 30 seconds)
+    ffmpegArgs.push('-i', absoluteAudioPath);
+    
+    // Create filter complex for concatenating images with vertical format
+    let filterComplex = '';
+    // Parse resolution to get width and height
+    const [width, height] = resolution.split('x').map(Number);
+    
+    // Scale and pad each image for vertical format, ensuring consistent timing
+    for (let i = 0; i < absoluteImagePaths.length; i++) {
+      filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
+    }
+    
+    // Concatenate all scaled images (no audio trimming - use full duration)
+    filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0,fps=${fps}[outv]`;
+    
+    ffmpegArgs.push(
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', `${absoluteImagePaths.length}:a:0`,
+      '-c:v', 'libx264',
+      '-c:a', 'aac',
+      '-b:a', '128k',           // Fixed audio bitrate for consistency
+      '-ar', '44100',           // Fixed sample rate
+      '-ac', '2',               // Stereo audio
+      '-pix_fmt', 'yuv420p',
+      '-crf', crfValue.toString(),
+      '-r', fps.toString(),
+      '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
+      '-fflags', '+genpts',     // Generate presentation timestamps
+      '-shortest',              // Use shortest stream (audio) to determine duration
+      '-y',
+      absoluteOutputPath
+    );
+
+    console.log('🎥 FFmpeg short video command: ffmpeg', ffmpegArgs.join(' '));
+
+    // Spawn FFmpeg process
+    const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stderr = '';
+
+    // Capture stderr for error reporting and progress
+    ffmpegProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+      // Look for progress indicators
+      const progressMatch = stderr.match(/time=(\d{2}):(\d{2}):(\d{2})/);
+      if (progressMatch) {
+        const [, hours, minutes, seconds] = progressMatch;
+        const currentTime = parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseInt(seconds);
+        const progress = Math.min((currentTime / audioDuration) * 100, 100);
+        console.log(`📱 Short video progress: ${Math.round(progress)}%`);
+      }
+    });
+
+    // Handle process completion
+    ffmpegProcess.on('close', async (code) => {
+      if (code === 0) {
+        try {
+          const stats = await fs.stat(absoluteOutputPath);
+          console.log(`✅ Short video created: ${absoluteOutputPath} (${Math.round(stats.size / 1024)}KB)`);
+          resolve(absoluteOutputPath);
+        } catch (error) {
+          reject(new Error(`Output file verification failed: ${error.message}`));
+        }
+      } else {
+        console.error('❌ FFmpeg short video stderr:', stderr);
+        reject(new Error(`FFmpeg short video failed with exit code ${code}: ${stderr}`));
+      }
+    });
+
+    // Handle process errors
+    ffmpegProcess.on('error', (error) => {
+      reject(new Error(`Failed to start FFmpeg short video: ${error.message}`));
+    });
+
+    // Set a timeout to prevent hanging
+    const timeout = setTimeout(() => {
+      ffmpegProcess.kill('SIGTERM');
+      reject(new Error('FFmpeg short video process timed out after 60 seconds'));
+    }, 60000);
+
+    ffmpegProcess.on('close', () => {
+      clearTimeout(timeout);
+    });
+  });
+}

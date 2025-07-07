@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { scrapeAmazonProduct } from './amazon-scraper.js';
 import { downloadImages, cleanupImages } from './image-downloader.js';
 import { generateVoiceover } from './voiceover-generator.js';
-import { generateAIReviewScript, generateAIVideoTitle, generateAIVideoDescription } from './openai-script-generator.js';
-import { createSlideshow } from './video-creator.js';
+import { generateAIReviewScript, generateAIVideoTitle, generateAIVideoDescription, generateAIShortVideoScript } from './openai-script-generator.js';
+import { createSlideshow, createShortVideo } from './video-creator.js';
 import { createThumbnail } from './thumbnail-generator.js';
 import { uploadToYouTube } from './youtube-publisher.js';
 import { PromotionManager } from './promotion-manager.js';
@@ -21,7 +21,8 @@ const DEFAULT_OPTIONS = {
   cleanup: true,
   onProgress: null,
   autoPromote: false,
-  promotionPlatforms: ['reddit', 'pinterest', 'twitter']
+  promotionPlatforms: ['reddit', 'pinterest', 'twitter'],
+  createShortVideo: true
 };
 
 /**
@@ -395,8 +396,70 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     timings.videoCreation.end = Date.now();
     console.log(`✅ Video created: ${finalVideoPath}`);
 
+    // Step 6.5: Create short video for social media (if enabled)
+    let shortVideoPath = null;
+    let shortVoiceoverPath = null;
+    if (config.createShortVideo) {
+      reportProgress(config.onProgress, 'shortVideoCreation', 75, 'Creating short video for social media');
+      timings.shortVideoCreation = { start: Date.now() };
+      
+      try {
+        // Generate short video script (~30 seconds)
+        console.log('📱 Generating short video script...');
+        const shortVideoScript = await generateAIShortVideoScript(productData, {
+          targetDuration: 30,
+          temperature: 0.8
+        });
+        console.log(`✅ Short video script generated: ${shortVideoScript.length} characters`);
+        
+        // Generate short video voiceover
+        console.log('🎤 Generating short video voiceover...');
+        shortVoiceoverPath = await generateVoiceover(
+          shortVideoScript,
+          `${config.tempDir}/short-voiceover.mp3`
+        );
+        tempFiles.push(shortVoiceoverPath);
+        console.log(`✅ Short video voiceover generated: ${shortVoiceoverPath}`);
+        
+        // Create short video
+        const shortVideoFilename = `${safeFilename}-short.mp4`;
+        shortVideoPath = `${config.outputDir}/${shortVideoFilename}`;
+        
+        console.log(`📱 Creating short video: ${shortVideoFilename}`);
+        
+        const shortVideoOptions = {
+          resolution: '1080x1920', // Vertical format for mobile
+          quality: config.videoQuality,
+          onProgress: progress => {
+            const overallProgress = 75 + (progress.percent || 0) * 0.05;
+            reportProgress(config.onProgress, 'shortVideoCreation', overallProgress,
+              `Creating short video: ${Math.round(progress.percent || 0)}%`);
+          }
+        };
+
+        shortVideoPath = await createShortVideo(
+          imagePaths,
+          shortVoiceoverPath,
+          shortVideoPath,
+          shortVideoOptions
+        );
+        
+        timings.shortVideoCreation.end = Date.now();
+        console.log(`✅ Short video created: ${shortVideoPath}`);
+        
+        // Note: Short video thumbnail and descriptions will be created after the main video description is generated
+        
+      } catch (error) {
+        console.warn(`⚠️ Short video creation failed: ${error.message}`);
+        console.log('📹 Continuing with main video only...');
+        shortVideoPath = null;
+        shortVoiceoverPath = null;
+        timings.shortVideoCreation = { start: timings.shortVideoCreation.start, end: Date.now() };
+      }
+    }
+
     // Step 7: Create thumbnail
-    reportProgress(config.onProgress, 'thumbnailCreation', 80, 'Creating YouTube thumbnail');
+    reportProgress(config.onProgress, 'thumbnailCreation', 82, 'Creating YouTube thumbnail');
     timings.thumbnailCreation = { start: Date.now() };
     
     const thumbnailPath = `${config.outputDir}/${safeFilename}-thumbnail.jpg`;
@@ -436,7 +499,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     }
 
     // Step 8: Generate AI-optimized video description
-    reportProgress(config.onProgress, 'descriptionGeneration', 82, 'Generating AI-optimized video description');
+    reportProgress(config.onProgress, 'descriptionGeneration', 84, 'Generating AI-optimized video description');
     timings.descriptionGeneration = { start: Date.now() };
     
     const baseVideoDescription = await generateAIVideoDescription(productData, videoTitle, {
@@ -453,7 +516,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     console.log(`✅ AI video description generated (${videoDescription.length} characters)`);
 
     // Step 9: Save video description to file
-    reportProgress(config.onProgress, 'descriptionSaving', 84, 'Saving video description to file');
+    reportProgress(config.onProgress, 'descriptionSaving', 86, 'Saving video description to file');
     let descriptionFilePath = null;
     
     try {
@@ -469,12 +532,49 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
       console.log('📹 Continuing...');
     }
 
+    // Step 9.5: Create short video files (thumbnail and descriptions) if short video was created
+    if (shortVideoPath) {
+      reportProgress(config.onProgress, 'shortVideoFiles', 88, 'Creating short video thumbnail and descriptions');
+      
+      // Create short video thumbnail
+      try {
+        const shortThumbnailPath = `${config.outputDir}/${safeFilename}-short.thumb.jpg`;
+        const shortThumbnailResult = await createThumbnail(
+          productData,
+          shortThumbnailPath,
+          { isVertical: true }
+        );
+        console.log(`✅ Short video thumbnail created: ${shortThumbnailResult}`);
+      } catch (error) {
+        console.warn(`⚠️ Short video thumbnail creation failed: ${error.message}`);
+      }
+      
+      // Create short video descriptions
+      try {
+        const shortDescriptionResult = await writeVideoDescription(
+          videoDescription,
+          `${videoTitle} - Short`,
+          config.outputDir,
+          {
+            filenameSuffix: '-short',
+            isShortVideo: true
+          }
+        );
+        console.log(`✅ Short video descriptions created: ${shortDescriptionResult.filename}`);
+      } catch (error) {
+        console.warn(`⚠️ Short video description creation failed: ${error.message}`);
+      }
+    }
+
     // Step 10: Review video before upload
-    reportProgress(config.onProgress, 'review', 85, 'Video ready for review');
+    reportProgress(config.onProgress, 'review', 87, 'Video ready for review');
     
     console.log('\n🎬 Video creation completed successfully!');
     console.log('📹 Video details:');
-    console.log(`   📁 File: ${finalVideoPath}`);
+    console.log(`   📁 Full video: ${finalVideoPath}`);
+    if (shortVideoPath) {
+      console.log(`   📱 Short video: ${shortVideoPath}`);
+    }
     console.log(`   📏 Title: ${videoTitle}`);
     console.log(`   ⏱️ Duration: ~${Math.round(timings.videoCreation.end - timings.videoCreation.start) / 1000}s to create`);
     
@@ -482,7 +582,13 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     try {
       const videoStats = await fs.stat(finalVideoPath);
       const videoSizeMB = Math.round(videoStats.size / (1024 * 1024) * 10) / 10;
-      console.log(`   📊 File size: ${videoSizeMB}MB`);
+      console.log(`   📊 Full video size: ${videoSizeMB}MB`);
+      
+      if (shortVideoPath) {
+        const shortVideoStats = await fs.stat(shortVideoPath);
+        const shortVideoSizeMB = Math.round(shortVideoStats.size / (1024 * 1024) * 10) / 10;
+        console.log(`   📊 Short video size: ${shortVideoSizeMB}MB`);
+      }
     } catch (error) {
       console.log('   📊 File size: Unable to determine');
     }
@@ -610,6 +716,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           images: imagePaths,
           voiceover: voiceoverPath,
           video: finalVideoPath,
+          shortVideo: shortVideoPath,
           thumbnail: finalThumbnailPath,
           promotionThumbnail: promotionThumbnailPath,
           description: descriptionFilePath
@@ -646,10 +753,14 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         files: {
           images: imagePaths,
           voiceover: voiceoverPath,
+          shortVoiceover: shortVoiceoverPath,
           video: finalVideoPath,
+          shortVideo: shortVideoPath,
           thumbnail: finalThumbnailPath,
+          shortThumbnail: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.thumb.jpg` : null,
           promotionThumbnail: promotionThumbnailPath,
-          description: descriptionFilePath
+          description: descriptionFilePath,
+          shortDescription: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.md` : null
         },
         stats: {
           imagesDownloaded: imagePaths.length,
@@ -723,6 +834,8 @@ Options:
   --auto-upload            Automatically upload to YouTube without confirmation
   --auto-promote           Automatically promote video on social media after upload
   --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter)
+  --create-short-video     Create a 30-second short video for social media (default: true)
+  --no-short-video         Disable short video creation
 
 Examples:
   # Using full URL
@@ -733,6 +846,12 @@ Examples:
   
   # Product ID with specific platforms
   node src/index.js "B08N5WRWNW" --promotion-platforms "reddit,twitter"
+  
+  # Create both full video and 30s short video for social media
+  node src/index.js "B0CPZKLJX1" --create-short-video
+  
+  # Disable short video creation (only create full video)
+  node src/index.js "B08N5WRWNW" --no-short-video
     `);
     process.exit(1);
   }
@@ -772,6 +891,14 @@ Examples:
         break;
       case '--promotion-platforms':
         options.promotionPlatforms = value ? value.split(',').map(p => p.trim()) : [];
+        break;
+      case '--create-short-video':
+        options.createShortVideo = true;
+        i--; // No value for this flag
+        break;
+      case '--no-short-video':
+        options.createShortVideo = false;
+        i--; // No value for this flag
         break;
     }
   }
