@@ -44,29 +44,9 @@ const getFileExtension = url => {
 const getImageQualityVersions = imageUrl => {
   if (!imageUrl) return [];
   
-  // For Amazon images, try to extract the base URL and construct different sizes
-  if (imageUrl.includes('amazon.com') || imageUrl.includes('ssl-images-amazon.com')) {
-    // Remove existing size parameters like ._SL1500_. or ._AC_SL1500_.
-    let baseUrl = imageUrl.replace(/\._[A-Z]*_?SL\d+_?\./g, '.');
-    
-    // Extract extension
-    const extensionMatch = baseUrl.match(/\.([a-zA-Z]{3,4})$/);
-    const extension = extensionMatch ? extensionMatch[0] : '.jpg';
-    
-    // Remove extension to get clean base
-    const cleanBase = baseUrl.replace(/\.[a-zA-Z]{3,4}$/, '');
-    
-    return [
-      `${cleanBase}._SL1500_${extension}`,  // 1500px (ultra high)
-      `${cleanBase}._SL1200_${extension}`,  // 1200px (very high)
-      `${cleanBase}._SL1000_${extension}`,  // 1000px (high)
-      `${cleanBase}._SL800_${extension}`,   // 800px (good)
-      `${cleanBase}._SL600_${extension}`,   // 600px (decent)
-      imageUrl                              // Original URL as fallback
-    ];
-  }
-  
-  return [imageUrl]; // Return original if not Amazon
+  // Just return the original URL - don't try to manipulate Amazon URLs
+  // The Amazon scraper should provide the best available URLs
+  return [imageUrl];
 };
 
 /**

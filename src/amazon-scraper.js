@@ -169,7 +169,7 @@ export const scrapeAmazonProduct = async url => {
         }
       }
 
-      // Extract product images
+      // Extract product images - get the highest quality versions available
       const imageElements = [
         ...document.querySelectorAll('#altImages img'),
         ...document.querySelectorAll('#landingImage'),
@@ -178,11 +178,30 @@ export const scrapeAmazonProduct = async url => {
         ...document.querySelectorAll('#imageBlock img')
       ];
 
-      const images = imageElements
-        .map(img => img.src || img.dataset.src || img.getAttribute('data-old-hires'))
-        .filter(src => src && (src.includes('amazon.com') || src.includes('ssl-images-amazon')))
-        .filter((src, index, arr) => arr.indexOf(src) === index) // Remove duplicates
-        .slice(0, 10); // Limit to 10 images
+      const images = [];
+      
+      imageElements.forEach(img => {
+        // Try to get the highest quality image URL available
+        const possibleSources = [
+          img.getAttribute('data-old-hires'),  // High-res version
+          img.getAttribute('data-a-hires'),    // Another high-res attribute
+          img.getAttribute('src'),             // Current source
+          img.getAttribute('data-src'),        // Lazy-loaded source
+          img.src                              // DOM property
+        ].filter(Boolean);
+        
+        // Add all unique sources
+        possibleSources.forEach(src => {
+          if (src &&
+              (src.includes('amazon.com') || src.includes('ssl-images-amazon')) &&
+              !images.includes(src)) {
+            images.push(src);
+          }
+        });
+      });
+
+      // Remove duplicates and limit to 10 images
+      const uniqueImages = [...new Set(images)].slice(0, 10);
 
       // Extract product features
       const featureSelectors = [
@@ -228,7 +247,7 @@ export const scrapeAmazonProduct = async url => {
         price,
         rating,
         reviewCount,
-        images,
+        images: uniqueImages,
         features,
         description
       };
