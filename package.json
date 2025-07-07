@@ -4,21 +4,30 @@
   "description": "Automated Amazon affiliate video creation with AI voiceover and YouTube publishing",
   "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "aff": "./bin/aff.js"
+  },
   "scripts": {
     "start": "node src/index.js",
+    "aff": "node bin/aff.js",
     "test": "mocha test/**/*.test.js --timeout 30000",
     "test:watch": "mocha test/**/*.test.js --watch --timeout 30000",
+    "test:cli": "mocha test/cli/**/*.test.js --timeout 30000",
     "test:promotion": "node test-promotion.js",
-    "promote": "node src/promotion-cli.js",
+    "promote": "node bin/aff.js promote",
     "promote:local": "node src/local-video-promoter.js",
     "generate-thumbnails": "node src/thumbnail-generator.js",
-    "promote:test": "node src/promotion-cli.js test",
-    "promote:stats": "node src/promotion-cli.js stats",
-    "promote:history": "node src/promotion-cli.js history",
-    "lint": "eslint src/ test/",
-    "lint:fix": "eslint src/ test/ --fix",
-    "format": "prettier --write src/ test/",
-    "format:check": "prettier --check src/ test/"
+    "promote:test": "node bin/aff.js promote test",
+    "promote:stats": "node bin/aff.js promote stats",
+    "promote:history": "node bin/aff.js promote history",
+    "create": "node bin/aff.js create",
+    "publish": "node bin/aff.js publish",
+    "lint": "eslint src/ test/ bin/",
+    "lint:fix": "eslint src/ test/ bin/ --fix",
+    "format": "prettier --write src/ test/ bin/",
+    "format:check": "prettier --check src/ test/ bin/",
+    "install:global": "npm install -g .",
+    "uninstall:global": "npm uninstall -g amazon-affiliate-video-automation"
   },
   "keywords": [
     "amazon",
