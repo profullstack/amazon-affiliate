@@ -1,28 +1,29 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs/promises';
-import { generateVoiceover } from '../src/voiceover-generator.js';
+import { generateVoiceover, getRandomVoice, VOICES } from '../src/voiceover-generator.js';
 
 describe('Voiceover Generator', () => {
   describe('generateVoiceover', () => {
     let fetchStub;
     let fsStub;
-    let processStub;
+    let processEnvStub;
 
     beforeEach(() => {
-      fetchStub = sinon.stub();
+      // Mock fetch
+      fetchStub = sinon.stub(global, 'fetch');
+      
+      // Mock fs
       fsStub = {
-        writeFile: sinon.stub(),
-        mkdir: sinon.stub(),
-        stat: sinon.stub()
+        writeFile: sinon.stub(fs, 'writeFile'),
+        mkdir: sinon.stub(fs, 'mkdir'),
+        stat: sinon.stub(fs, 'stat')
       };
       
-      processStub = {
-        env: {
-          ELEVENLABS_API_KEY: 'test-api-key',
-          ELEVENLABS_VOICE_ID: 'test-voice-id'
-        }
-      };
+      // Mock process.env
+      processEnvStub = sinon.stub(process, 'env').value({
+        ELEVENLABS_API_KEY: 'test-api-key'
+      });
 
       // Mock successful API response
       fetchStub.resolves({
@@ -60,7 +61,7 @@ describe('Voiceover Generator', () => {
     });
 
     it('should throw error when API key is missing', async () => {
-      processStub.env.ELEVENLABS_API_KEY = undefined;
+      processEnvStub.value({});
 
       try {
         await generateVoiceover('Test text');
@@ -133,9 +134,8 @@ describe('Voiceover Generator', () => {
       expect(requestBody.text.length).to.be.lessThan(5000);
     });
 
-    it('should use correct API endpoint and headers', async () => {
+    it('should use correct API endpoint and headers with random voice', async () => {
       const text = 'Test text';
-      const expectedUrl = 'https://api.elevenlabs.io/v1/text-to-speech/test-voice-id';
       const expectedHeaders = {
         'Accept': 'audio/mpeg',
         'xi-api-key': 'test-api-key',
@@ -144,7 +144,17 @@ describe('Voiceover Generator', () => {
 
       await generateVoiceover(text);
 
-      expect(fetchStub).to.have.been.calledWith(expectedUrl, {
+      // Check that the URL contains the base endpoint
+      const actualCall = fetchStub.getCall(0);
+      const actualUrl = actualCall.args[0];
+      expect(actualUrl).to.match(/^https:\/\/api\.elevenlabs\.io\/v1\/text-to-speech\/.+/);
+      
+      // Check that the voice ID is one from our VOICES array
+      const voiceId = actualUrl.split('/').pop();
+      const voiceIds = Object.values(VOICES);
+      expect(voiceIds).to.include(voiceId);
+
+      expect(fetchStub).to.have.been.calledWith(actualUrl, {
         method: 'POST',
         headers: expectedHeaders,
         body: sinon.match.string
@@ -213,6 +223,72 @@ describe('Voiceover Generator', () => {
 
       expect(result).to.equal('temp/voiceover.mp3');
       expect(fetchStub).to.have.been.calledTwice;
+    });
+  });
+
+  describe('getRandomVoice', () => {
+    it('should return a valid voice ID from the VOICES array', () => {
+      const voiceId = getRandomVoice();
+      const voiceIds = Object.values(VOICES);
+      
+      expect(voiceIds).to.include(voiceId);
+      expect(voiceId).to.be.a('string');
+      expect(voiceId).to.have.length.greaterThan(0);
+    });
+
+    it('should return different voices on multiple calls (probabilistic test)', () => {
+      const results = new Set();
+      
+      // Call getRandomVoice multiple times to increase chance of getting different voices
+      for (let i = 0; i < 50; i++) {
+        results.add(getRandomVoice());
+      }
+      
+      // With 10 voices and 50 calls, we should get at least 2 different voices
+      expect(results.size).to.be.greaterThan(1);
+    });
+
+    it('should always return a voice ID that exists in the VOICES object', () => {
+      const voiceIds = Object.values(VOICES);
+      
+      for (let i = 0; i < 20; i++) {
+        const selectedVoice = getRandomVoice();
+        expect(voiceIds).to.include(selectedVoice);
+      }
+    });
+  });
+
+  describe('VOICES constant', () => {
+    it('should contain all expected voice names', () => {
+      const expectedVoiceNames = [
+        'antoni', 'adam', 'sam', 'jake', 'drew',
+        'rachel', 'bella', 'elli', 'grace', 'charlotte'
+      ];
+      
+      const actualVoiceNames = Object.keys(VOICES);
+      expect(actualVoiceNames).to.have.members(expectedVoiceNames);
+    });
+
+    it('should have valid voice IDs for all voices', () => {
+      Object.entries(VOICES).forEach(([name, id]) => {
+        expect(id).to.be.a('string');
+        expect(id).to.have.length.greaterThan(10); // ElevenLabs voice IDs are typically longer
+        expect(name).to.be.a('string');
+        expect(name).to.have.length.greaterThan(0);
+      });
+    });
+
+    it('should contain both male and female voices', () => {
+      const maleVoices = ['antoni', 'adam', 'sam', 'jake', 'drew'];
+      const femaleVoices = ['rachel', 'bella', 'elli', 'grace', 'charlotte'];
+      
+      maleVoices.forEach(voice => {
+        expect(VOICES).to.have.property(voice);
+      });
+      
+      femaleVoices.forEach(voice => {
+        expect(VOICES).to.have.property(voice);
+      });
     });
   });
 });

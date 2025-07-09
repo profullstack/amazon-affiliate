@@ -3,6 +3,50 @@ import fs from 'fs/promises';
 import path from 'path';
 
 /**
+ * Recommended ElevenLabs Voices for Product Reviews
+ *
+ * This collection includes a diverse set of high-quality voices optimized for product reviews.
+ * The system automatically selects a random voice for each voiceover generation to provide
+ * variety and prevent monotony across multiple videos.
+ *
+ * Voice Categories:
+ * - Male Voices: Antoni, Adam, Sam, Jake, Drew
+ * - Female Voices: Rachel, Bella, Elli, Grace, Charlotte
+ *
+ * Each voice has been selected for its clarity, professionalism, and suitability for
+ * product review content.
+ */
+const VOICES = {
+  // Male Voices
+  antoni: 'ErXwobaYiN019PkySvjV',   // Antoni: Professional, Clear
+  adam: 'pNInz6obpgDQGcFmaJgB',     // Adam: Authoritative, Deep
+  sam: 'yoZ06aMxZJJ28mfd3POQ',      // Sam: Friendly, Conversational
+  jake: 'onwK4e9ZLuTAKqWW03F9',     // Jake: Upbeat, Dynamic
+  drew: '29vD33N1CtxCmqQRPOHJ',     // Drew: Warm, Confident
+
+  // Female Voices
+  rachel: '21m00Tcm4TlvDq8ikWAM',   // Rachel: Clear, Professional, Trustworthy
+  bella: 'EXAVITQu4vr4xnSDxMaL',    // Bella: Warm, Friendly, Engaging
+  elli: 'MF3mGyEYCl7XYWbV9V6O',     // Elli: Bright, Energetic, Youthful
+  grace: 'oWAxZDx7w5VEj9dCyTzz',    // Grace: Calm, Sophisticated, Clear
+  charlotte: 'XB0fDUnXU5powFXDhCwa' // Charlotte: Smooth, Authoritative
+};
+
+/**
+ * Randomly selects a voice from the available voices array
+ * @returns {string} - Voice ID for ElevenLabs API
+ */
+const getRandomVoice = () => {
+  const voiceNames = Object.keys(VOICES);
+  const randomIndex = Math.floor(Math.random() * voiceNames.length);
+  const selectedVoiceName = voiceNames[randomIndex];
+  const selectedVoiceId = VOICES[selectedVoiceName];
+  
+  console.log(`🎤 Selected voice: ${selectedVoiceName} (${selectedVoiceId})`);
+  return selectedVoiceId;
+};
+
+/**
  * Default voice settings for Eleven Labs API
  */
 const DEFAULT_VOICE_SETTINGS = {
@@ -126,17 +170,13 @@ const preprocessText = text => {
  * @throws {Error} When required environment variables are missing
  */
 const validateEnvironment = () => {
-  const { ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID } = process.env;
+  const { ELEVENLABS_API_KEY } = process.env;
 
   if (!ELEVENLABS_API_KEY) {
     throw new Error('ELEVENLABS_API_KEY is required in environment variables');
   }
 
-  if (!ELEVENLABS_VOICE_ID) {
-    throw new Error('ELEVENLABS_VOICE_ID is required in environment variables');
-  }
-
-  return { ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID };
+  return { ELEVENLABS_API_KEY };
 };
 
 /**
@@ -197,6 +237,11 @@ const makeApiRequest = async (text, apiKey, voiceId, voiceSettings, retries = 3)
 
 /**
  * Generates voiceover from text using Eleven Labs API
+ *
+ * This function automatically selects a random voice from the predefined VOICES array
+ * to provide variety across different voiceover generations. No longer requires
+ * ELEVENLABS_VOICE_ID environment variable.
+ *
  * @param {string} text - Text to convert to speech
  * @param {string} outputPath - Path where to save the audio file
  * @param {Object} voiceSettings - Custom voice settings (optional)
@@ -213,8 +258,9 @@ export const generateVoiceover = async (
     throw new Error('Text is required and must be a non-empty string');
   }
 
-  // Validate environment
-  const { ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID } = validateEnvironment();
+  // Validate environment and get random voice
+  const { ELEVENLABS_API_KEY } = validateEnvironment();
+  const ELEVENLABS_VOICE_ID = getRandomVoice();
 
   // Enhance text for natural speech, then preprocess
   const enhancedText = enhanceTextForSpeech(text);
@@ -299,8 +345,14 @@ export const getAvailableVoices = async () => {
  * @param {string} text - Text to analyze
  * @returns {number} - Estimated duration in seconds
  */
-// Export voice settings for external use
-export { DEFAULT_VOICE_SETTINGS, NATURAL_VOICE_SETTINGS, CONVERSATIONAL_VOICE_SETTINGS };
+// Export voice settings and voices for external use
+export {
+  DEFAULT_VOICE_SETTINGS,
+  NATURAL_VOICE_SETTINGS,
+  CONVERSATIONAL_VOICE_SETTINGS,
+  VOICES,
+  getRandomVoice
+};
 
 export const estimateAudioDuration = text => {
   if (!text || typeof text !== 'string') {
