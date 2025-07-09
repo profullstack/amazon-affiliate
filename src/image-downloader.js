@@ -76,12 +76,19 @@ const downloadSingleImage = async (url, filePath, retries = 2) => {
     // Try downloading this quality version with retries
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        const response = await fetch(currentUrl, {
-          timeout: 30000,
+        // Create a timeout promise to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000);
+        });
+
+        const fetchPromise = fetch(currentUrl, {
+          timeout: 15000,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
           }
         });
+
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -104,8 +111,8 @@ const downloadSingleImage = async (url, filePath, retries = 2) => {
         console.warn(`Attempt ${attempt + 1}/${retries} failed for ${qualityLabel} quality: ${error.message}`);
         
         if (attempt < retries - 1) {
-          // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+          // Wait before retry (shorter delay to speed up process)
+          await new Promise(resolve => setTimeout(resolve, 500 + (attempt * 500)));
         }
       }
     }

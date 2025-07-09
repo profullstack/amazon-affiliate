@@ -3,6 +3,7 @@
  */
 
 import { createAffiliateVideo } from '../index.js';
+import { ensureYouTubeAuthentication } from '../youtube-auth-utils.js';
 import {
   parseCommandArgs,
   validateRequiredArgs,
@@ -72,6 +73,16 @@ const FLAG_DEFINITIONS = {
     type: 'boolean',
     default: false,
     description: 'Run browser automation in headless mode'
+  },
+  'male': {
+    type: 'boolean',
+    default: false,
+    description: 'Use male voice for voiceover generation'
+  },
+  'female': {
+    type: 'boolean',
+    default: false,
+    description: 'Use female voice for voiceover generation'
   }
 };
 
@@ -102,6 +113,8 @@ Options:
   --create-short-video       Create a 30-second short video for social media (default: true)
   --no-short-video           Disable short video creation
   --headless                 Run browser automation in headless mode
+  --male                     Use male voice for voiceover generation
+  --female                   Use female voice for voiceover generation
 
 Examples:
   # Create video from product ID with high quality
@@ -144,6 +157,11 @@ const validateCreateArgs = (args, options) => {
   if (options['no-short-video']) {
     options['create-short-video'] = false;
   }
+
+  // Handle conflicting voice options
+  if (options.male && options.female) {
+    exitWithError('Cannot specify both --male and --female voice options. Choose one or neither for random selection.');
+  }
 };
 
 /**
@@ -152,6 +170,14 @@ const validateCreateArgs = (args, options) => {
  * @returns {Object} - Options for createAffiliateVideo function
  */
 const convertToVideoOptions = (cliOptions) => {
+  // Determine voice gender preference
+  let voiceGender = null;
+  if (cliOptions.male) {
+    voiceGender = 'male';
+  } else if (cliOptions.female) {
+    voiceGender = 'female';
+  }
+
   return {
     maxImages: cliOptions['max-images'],
     videoQuality: cliOptions.quality,
@@ -163,6 +189,7 @@ const convertToVideoOptions = (cliOptions) => {
     promotionPlatforms: cliOptions['promotion-platforms'],
     createShortVideo: cliOptions['create-short-video'],
     headless: cliOptions.headless,
+    voiceGender: voiceGender,
     onProgress: createProgressCallback()
   };
 };
@@ -275,7 +302,14 @@ const createCommand = async (args) => {
       console.log(`📢 Auto-promote: ${options['promotion-platforms'].join(', ')}`);
     }
     
-    console.log(''); // Empty line before progress starts
+    console.log(''); // Empty line before authentication check
+
+    // Authenticate with YouTube first (required for video creation workflow)
+    try {
+      await ensureYouTubeAuthentication();
+    } catch (error) {
+      exitWithError(`YouTube authentication failed: ${error.message}`);
+    }
 
     // Convert CLI options to video creation options
     const videoOptions = convertToVideoOptions(options);
