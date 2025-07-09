@@ -3,6 +3,30 @@ import sinon from 'sinon';
 import fs from 'fs/promises';
 import { uploadToYouTube } from '../src/youtube-publisher.js';
 
+// Mock the google module
+const mockGoogle = {
+  youtube: sinon.stub(),
+  auth: {
+    OAuth2: sinon.stub()
+  }
+};
+
+// Mock OAuth2 client
+const mockOAuth2Client = {
+  setCredentials: sinon.stub(),
+  on: sinon.stub()
+};
+
+// Mock YouTube API
+const mockYouTubeAPI = {
+  videos: {
+    insert: sinon.stub()
+  },
+  thumbnails: {
+    set: sinon.stub()
+  }
+};
+
 describe('YouTube Publisher', () => {
   describe('uploadToYouTube', () => {
     let googleStub;
@@ -274,6 +298,91 @@ describe('YouTube Publisher', () => {
       } catch (error) {
         expect(error.message).to.include('Unsupported video format');
       }
+    });
+
+    describe('buildDescription function', () => {
+      it('should not duplicate affiliate content when already present', async () => {
+        const existingDescription = `Great product review!
+
+🛒 Get this product here: https://www.amazon.com/dp/B08N5WRWNW?tag=existing-tag
+
+⚠️ As an Amazon Associate, I earn from qualifying purchases.
+This helps support the channel at no extra cost to you!
+
+#Amazon #ProductReview #Review`;
+        
+        const productUrl = 'https://www.amazon.com/dp/B08N5WRWNW';
+        
+        await uploadToYouTube('video.mp4', 'Title', existingDescription, productUrl);
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+
+        // Should not contain duplicate affiliate sections
+        const affiliateMatches = (finalDescription.match(/🛒 Get this product here:/g) || []).length;
+        const associateMatches = (finalDescription.match(/As an Amazon Associate/g) || []).length;
+        
+        expect(affiliateMatches).to.equal(1, 'Should only have one affiliate link section');
+        expect(associateMatches).to.equal(1, 'Should only have one associate disclaimer');
+      });
+
+      it('should add affiliate content when not present', async () => {
+        const baseDescription = `Great product review!
+
+#Amazon #ProductReview #Review`;
+        
+        const productUrl = 'https://www.amazon.com/dp/B08N5WRWNW';
+        
+        await uploadToYouTube('video.mp4', 'Title', baseDescription, productUrl);
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+
+        expect(finalDescription).to.include('🛒 Get this product here:');
+        expect(finalDescription).to.include('As an Amazon Associate');
+        expect(finalDescription).to.include('test-affiliate-tag');
+      });
+
+      it('should handle partial affiliate content correctly', async () => {
+        const partialDescription = `Great product review!
+
+🛒 Get this product here: https://www.amazon.com/dp/B08N5WRWNW?tag=old-tag
+
+#Amazon #ProductReview #Review`;
+        
+        const productUrl = 'https://www.amazon.com/dp/B08N5WRWNW';
+        
+        await uploadToYouTube('video.mp4', 'Title', partialDescription, productUrl);
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+
+        // Should not duplicate the affiliate link section
+        const affiliateMatches = (finalDescription.match(/🛒 Get this product here:/g) || []).length;
+        expect(affiliateMatches).to.equal(1, 'Should only have one affiliate link section');
+      });
+
+      it('should preserve existing content when no product URL provided', async () => {
+        const existingDescription = `Great product review!
+
+🛒 Get this product here: https://www.amazon.com/dp/B08N5WRWNW?tag=existing-tag
+
+⚠️ As an Amazon Associate, I earn from qualifying purchases.
+This helps support the channel at no extra cost to you!
+
+#Amazon #ProductReview #Review`;
+        
+        await uploadToYouTube('video.mp4', 'Title', existingDescription);
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+
+        expect(finalDescription).to.equal(existingDescription);
+      });
     });
   });
 });

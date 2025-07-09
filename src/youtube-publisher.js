@@ -227,6 +227,24 @@ const generateAffiliateUrl = (productUrl, affiliateTag) => {
 };
 
 /**
+ * Checks if description already contains affiliate content
+ * @param {string} description - Description text to check
+ * @returns {boolean} - True if affiliate content is already present
+ */
+const hasAffiliateContent = (description) => {
+  if (!description) return false;
+  
+  // Check for affiliate link indicator
+  const hasAffiliateLink = description.includes('🛒 Get this product here:');
+  
+  // Check for Amazon Associate disclaimer
+  const hasAssociateDisclaimer = description.includes('As an Amazon Associate');
+  
+  // Consider it has affiliate content if either indicator is present
+  return hasAffiliateLink || hasAssociateDisclaimer;
+};
+
+/**
  * Builds video description with affiliate link
  * @param {string} baseDescription - Base description text
  * @param {string} productUrl - Amazon product URL
@@ -236,7 +254,8 @@ const generateAffiliateUrl = (productUrl, affiliateTag) => {
 const buildDescription = (baseDescription, productUrl, affiliateTag) => {
   let description = baseDescription || '';
 
-  if (productUrl && affiliateTag) {
+  // Only add affiliate content if it doesn't already exist and we have the required parameters
+  if (productUrl && affiliateTag && !hasAffiliateContent(description)) {
     const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
     
     if (description.length > 0) {
