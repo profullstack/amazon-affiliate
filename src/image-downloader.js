@@ -44,9 +44,9 @@ const getFileExtension = url => {
 const getImageQualityVersions = imageUrl => {
   if (!imageUrl) return [];
   
-  // Just return the original URL - don't try to manipulate Amazon URLs
-  // The Amazon scraper should provide the best available URLs
-  return [imageUrl];
+  // The enhanced scraper now provides actual zoom image URLs, so use them directly
+  // Only provide minimal fallback for edge cases
+  return [imageUrl]; // Trust the scraper to provide the best available URLs
 };
 
 /**

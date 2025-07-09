@@ -133,6 +133,7 @@ Key requirements:
 - Aim for 60-90 seconds of speaking time (approximately 150-200 words)
 - Transform the Amazon description into natural, conversational English language
 - Avoid any non-English words, brand names in foreign languages, or international expressions
+- CRITICAL: When mentioning prices, always use "dollars" (e.g., "fifty dollars", "two hundred dollars") instead of just the dollar sign
 - CRITICAL: Never include section headers, titles, or labels like "Introduction:", "Features:", "Conclusion:" etc.
 - Create a natural flowing presentation script that sounds like a continuous conversation
 - Transition smoothly between topics without announcing what section you're moving to`;
@@ -204,7 +205,7 @@ Create a natural, flowing presentation script that seamlessly covers these eleme
 - Start with a natural hook that mentions the product name
 - Smoothly transition to explaining what this product is and what it does using the Amazon description
 - Naturally highlight the most important features from the Amazon listing in your own words
-- Organically discuss the current price and whether it represents good value
+- Organically discuss the current price and whether it represents good value (always say "dollars" when mentioning prices, not just "$")
 - Naturally reference the rating and review count to build credibility
 - Mention that you'll be showing the product images during the review
 - Give your genuine opinion based on the product information
@@ -814,6 +815,7 @@ STYLE GUIDELINES:
 - Focus on the most compelling selling points
 - Target exactly ${targetDuration} seconds of speaking time (~75-90 words)
 - Use "I" statements to make it personal
+- When mentioning prices, always say "dollars" (e.g., "fifty dollars") instead of just "$"
 - End with a clear call-to-action
 
 TONE: Energetic, authentic, and helpful - like you're excitedly telling a friend about a great find.

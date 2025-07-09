@@ -33,14 +33,56 @@ const VOICES = {
 };
 
 /**
+ * Gets male voices from the VOICES object
+ * @returns {Object} - Object containing male voices
+ */
+const getMaleVoices = () => {
+  return {
+    antoni: VOICES.antoni,
+    adam: VOICES.adam,
+    sam: VOICES.sam,
+    jake: VOICES.jake,
+    drew: VOICES.drew
+  };
+};
+
+/**
+ * Gets female voices from the VOICES object
+ * @returns {Object} - Object containing female voices
+ */
+const getFemaleVoices = () => {
+  return {
+    rachel: VOICES.rachel,
+    bella: VOICES.bella,
+    elli: VOICES.elli,
+    grace: VOICES.grace,
+    charlotte: VOICES.charlotte
+  };
+};
+
+/**
  * Randomly selects a voice from the available voices array
+ * @param {string} gender - Optional gender preference ('male', 'female', or undefined for random)
  * @returns {string} - Voice ID for ElevenLabs API
  */
-const getRandomVoice = () => {
-  const voiceNames = Object.keys(VOICES);
+const getRandomVoice = (gender = null) => {
+  let availableVoices;
+  
+  if (gender === 'male') {
+    availableVoices = getMaleVoices();
+    console.log('🎤 Using male voice selection');
+  } else if (gender === 'female') {
+    availableVoices = getFemaleVoices();
+    console.log('🎤 Using female voice selection');
+  } else {
+    availableVoices = VOICES;
+    console.log('🎤 Using random voice selection');
+  }
+  
+  const voiceNames = Object.keys(availableVoices);
   const randomIndex = Math.floor(Math.random() * voiceNames.length);
   const selectedVoiceName = voiceNames[randomIndex];
-  const selectedVoiceId = VOICES[selectedVoiceName];
+  const selectedVoiceId = availableVoices[selectedVoiceName];
   
   console.log(`🎤 Selected voice: ${selectedVoiceName} (${selectedVoiceId})`);
   return selectedVoiceId;
@@ -245,22 +287,29 @@ const makeApiRequest = async (text, apiKey, voiceId, voiceSettings, retries = 3)
  * @param {string} text - Text to convert to speech
  * @param {string} outputPath - Path where to save the audio file
  * @param {Object} voiceSettings - Custom voice settings (optional)
+ * @param {string} gender - Voice gender preference ('male', 'female', or null for random)
  * @returns {Promise<string>} - Path to the generated audio file
  * @throws {Error} When generation fails
  */
 export const generateVoiceover = async (
   text,
   outputPath = 'temp/voiceover.mp3',
-  voiceSettings = CONVERSATIONAL_VOICE_SETTINGS
+  voiceSettings = CONVERSATIONAL_VOICE_SETTINGS,
+  gender = null
 ) => {
   // Validate input
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('Text is required and must be a non-empty string');
   }
 
-  // Validate environment and get random voice
+  // Validate gender parameter
+  if (gender && !['male', 'female'].includes(gender)) {
+    throw new Error('Gender must be "male", "female", or null');
+  }
+
+  // Validate environment and get voice based on gender preference
   const { ELEVENLABS_API_KEY } = validateEnvironment();
-  const ELEVENLABS_VOICE_ID = getRandomVoice();
+  const ELEVENLABS_VOICE_ID = getRandomVoice(gender);
 
   // Enhance text for natural speech, then preprocess
   const enhancedText = enhanceTextForSpeech(text);
@@ -351,7 +400,9 @@ export {
   NATURAL_VOICE_SETTINGS,
   CONVERSATIONAL_VOICE_SETTINGS,
   VOICES,
-  getRandomVoice
+  getRandomVoice,
+  getMaleVoices,
+  getFemaleVoices
 };
 
 export const estimateAudioDuration = text => {

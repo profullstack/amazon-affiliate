@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs/promises';
-import { generateVoiceover, getRandomVoice, VOICES } from '../src/voiceover-generator.js';
+import { generateVoiceover, getRandomVoice, getMaleVoices, getFemaleVoices, VOICES } from '../src/voiceover-generator.js';
 
 describe('Voiceover Generator', () => {
   describe('generateVoiceover', () => {
@@ -288,6 +288,154 @@ describe('Voiceover Generator', () => {
       
       femaleVoices.forEach(voice => {
         expect(VOICES).to.have.property(voice);
+      });
+    });
+  });
+
+  describe('Voice Gender Selection', () => {
+    describe('getMaleVoices', () => {
+      it('should return only male voices', () => {
+        const maleVoices = getMaleVoices();
+        const expectedMaleVoices = ['antoni', 'adam', 'sam', 'jake', 'drew'];
+        
+        expect(Object.keys(maleVoices)).to.have.members(expectedMaleVoices);
+        expect(Object.keys(maleVoices)).to.have.length(5);
+      });
+
+      it('should return valid voice IDs for male voices', () => {
+        const maleVoices = getMaleVoices();
+        
+        Object.entries(maleVoices).forEach(([name, id]) => {
+          expect(id).to.be.a('string');
+          expect(id).to.have.length.greaterThan(10);
+          expect(VOICES[name]).to.equal(id);
+        });
+      });
+    });
+
+    describe('getFemaleVoices', () => {
+      it('should return only female voices', () => {
+        const femaleVoices = getFemaleVoices();
+        const expectedFemaleVoices = ['rachel', 'bella', 'elli', 'grace', 'charlotte'];
+        
+        expect(Object.keys(femaleVoices)).to.have.members(expectedFemaleVoices);
+        expect(Object.keys(femaleVoices)).to.have.length(5);
+      });
+
+      it('should return valid voice IDs for female voices', () => {
+        const femaleVoices = getFemaleVoices();
+        
+        Object.entries(femaleVoices).forEach(([name, id]) => {
+          expect(id).to.be.a('string');
+          expect(id).to.have.length.greaterThan(10);
+          expect(VOICES[name]).to.equal(id);
+        });
+      });
+    });
+
+    describe('getRandomVoice with gender parameter', () => {
+      it('should return male voice when gender is "male"', () => {
+        const maleVoiceIds = Object.values(getMaleVoices());
+        
+        for (let i = 0; i < 10; i++) {
+          const voiceId = getRandomVoice('male');
+          expect(maleVoiceIds).to.include(voiceId);
+        }
+      });
+
+      it('should return female voice when gender is "female"', () => {
+        const femaleVoiceIds = Object.values(getFemaleVoices());
+        
+        for (let i = 0; i < 10; i++) {
+          const voiceId = getRandomVoice('female');
+          expect(femaleVoiceIds).to.include(voiceId);
+        }
+      });
+
+      it('should return any voice when gender is null or undefined', () => {
+        const allVoiceIds = Object.values(VOICES);
+        
+        const randomVoice1 = getRandomVoice(null);
+        const randomVoice2 = getRandomVoice(undefined);
+        const randomVoice3 = getRandomVoice();
+        
+        expect(allVoiceIds).to.include(randomVoice1);
+        expect(allVoiceIds).to.include(randomVoice2);
+        expect(allVoiceIds).to.include(randomVoice3);
+      });
+    });
+
+    describe('generateVoiceover with gender parameter', () => {
+      let fetchStub;
+      let fsStub;
+      let processEnvStub;
+
+      beforeEach(() => {
+        // Mock fetch
+        fetchStub = sinon.stub(global, 'fetch');
+        
+        // Mock fs
+        fsStub = {
+          writeFile: sinon.stub(fs, 'writeFile'),
+          mkdir: sinon.stub(fs, 'mkdir'),
+          stat: sinon.stub(fs, 'stat')
+        };
+        
+        // Mock process.env
+        processEnvStub = sinon.stub(process, 'env').value({
+          ELEVENLABS_API_KEY: 'test-api-key'
+        });
+
+        // Mock successful API response
+        fetchStub.resolves({
+          ok: true,
+          arrayBuffer: sinon.stub().resolves(new ArrayBuffer(2048))
+        });
+
+        fsStub.mkdir.resolves();
+        fsStub.writeFile.resolves();
+        fsStub.stat.resolves({ size: 2048 });
+      });
+
+      afterEach(() => {
+        sinon.restore();
+      });
+
+      it('should use male voice when gender is "male"', async () => {
+        const text = 'Test text';
+        const maleVoiceIds = Object.values(getMaleVoices());
+        
+        await generateVoiceover(text, undefined, undefined, 'male');
+        
+        const apiCall = fetchStub.getCall(0);
+        const actualUrl = apiCall.args[0];
+        const voiceId = actualUrl.split('/').pop();
+        
+        expect(maleVoiceIds).to.include(voiceId);
+      });
+
+      it('should use female voice when gender is "female"', async () => {
+        const text = 'Test text';
+        const femaleVoiceIds = Object.values(getFemaleVoices());
+        
+        await generateVoiceover(text, undefined, undefined, 'female');
+        
+        const apiCall = fetchStub.getCall(0);
+        const actualUrl = apiCall.args[0];
+        const voiceId = actualUrl.split('/').pop();
+        
+        expect(femaleVoiceIds).to.include(voiceId);
+      });
+
+      it('should throw error for invalid gender parameter', async () => {
+        const text = 'Test text';
+        
+        try {
+          await generateVoiceover(text, undefined, undefined, 'invalid');
+          expect.fail('Should have thrown an error');
+        } catch (error) {
+          expect(error.message).to.include('Gender must be "male", "female", or null');
+        }
       });
     });
   });

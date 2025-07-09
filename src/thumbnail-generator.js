@@ -5,6 +5,50 @@ import path from 'path';
 import { createStylishThumbnail, generateThumbnailTitle, isImageMagickAvailable } from './image-processor.js';
 
 /**
+ * Select the highest quality image from an array of image URLs
+ * Prioritizes images with quality indicators like _SL1200_, _AC_SL1200_, etc.
+ * @param {string[]} imageUrls - Array of image URLs
+ * @returns {string} The highest quality image URL
+ */
+function selectBestQualityImage(imageUrls) {
+  if (!imageUrls || imageUrls.length === 0) {
+    throw new Error('No image URLs provided');
+  }
+
+  // Quality indicators in order of preference (highest to lowest)
+  const qualityIndicators = [
+    '_SL1500_',
+    '_AC_SL1500_',
+    '_SL1200_',
+    '_AC_SL1200_',
+    '_SL1000_',
+    '_AC_SL1000_',
+    '_SL800_',
+    '_AC_SL800_',
+    '_SL600_',
+    '_AC_SL600_',
+    '_SL500_',
+    '_AC_SL500_',
+    '_SL400_',
+    '_AC_SL400_'
+  ];
+
+  // First, try to find images with quality indicators
+  for (const indicator of qualityIndicators) {
+    const matchingImage = imageUrls.find(url => url.includes(indicator));
+    if (matchingImage) {
+      console.log(`🎯 Selected high-quality image with indicator ${indicator}: ${matchingImage}`);
+      return matchingImage;
+    }
+  }
+
+  // If no quality indicators found, prefer longer URLs (often contain more parameters)
+  const sortedByLength = [...imageUrls].sort((a, b) => b.length - a.length);
+  console.log(`📸 Selected image by URL length: ${sortedByLength[0]}`);
+  return sortedByLength[0];
+}
+
+/**
  * Utility to generate thumbnails for existing videos that don't have them
  */
 export class ThumbnailGenerator {
@@ -303,19 +347,20 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
         throw new Error('No product images available for thumbnail creation');
       }
 
-      const firstImageUrl = productData.images[0];
+      // Select the highest quality image for thumbnail
+      const bestImageUrl = selectBestQualityImage(productData.images);
       const tempImagePath = path.join(tempDir, 'temp-thumbnail-source.jpg');
       
-      console.log(`📥 Downloading image for thumbnail: ${firstImageUrl}`);
+      console.log(`📥 Downloading high-quality image for thumbnail: ${bestImageUrl}`);
       
       // Download the image using Node.js https/http
       const { default: https } = await import('https');
       const { default: http } = await import('http');
       
-      const client = firstImageUrl.startsWith('https:') ? https : http;
+      const client = bestImageUrl.startsWith('https:') ? https : http;
       
       await new Promise((resolve, reject) => {
-        const request = client.get(firstImageUrl, (response) => {
+        const request = client.get(bestImageUrl, (response) => {
           if (response.statusCode !== 200) {
             reject(new Error(`Failed to download image: ${response.statusCode} ${response.statusMessage}`));
             return;

@@ -249,10 +249,24 @@ const hasAffiliateContent = (description) => {
  * @param {string} baseDescription - Base description text
  * @param {string} productUrl - Amazon product URL
  * @param {string} affiliateTag - Amazon affiliate tag
+ * @param {boolean} isShorts - Whether this is for YouTube Shorts
  * @returns {string} - Complete description with affiliate link
  */
-const buildDescription = (baseDescription, productUrl, affiliateTag) => {
+const buildDescription = (baseDescription, productUrl, affiliateTag, isShorts = false) => {
   let description = baseDescription || '';
+
+  // For Shorts, keep description concise and add Shorts-specific hashtags
+  if (isShorts) {
+    // Truncate description for Shorts (keep it under 125 characters for better visibility)
+    if (description.length > 100) {
+      description = description.substring(0, 97) + '...';
+    }
+    
+    // Add Shorts-specific hashtags if not already present
+    if (!description.includes('#Shorts')) {
+      description += '\n\n#Shorts #Short #Vertical #QuickReview';
+    }
+  }
 
   // Only add affiliate content if it doesn't already exist and we have the required parameters
   if (productUrl && affiliateTag && !hasAffiliateContent(description)) {
@@ -262,9 +276,16 @@ const buildDescription = (baseDescription, productUrl, affiliateTag) => {
       description += '\n\n';
     }
     
-    description += `🛒 Get this product here: ${affiliateUrl}\n\n`;
-    description += '⚠️ As an Amazon Associate, I earn from qualifying purchases.\n';
-    description += 'This helps support the channel at no extra cost to you!';
+    if (isShorts) {
+      // Shorter affiliate content for Shorts
+      description += `🛒 ${affiliateUrl}\n`;
+      description += '⚠️ As an Amazon Associate, I earn from qualifying purchases.';
+    } else {
+      // Full affiliate content for regular videos
+      description += `🛒 Get this product here: ${affiliateUrl}\n\n`;
+      description += '⚠️ As an Amazon Associate, I earn from qualifying purchases.\n';
+      description += 'This helps support the channel at no extra cost to you!';
+    }
   }
 
   return description;
@@ -397,6 +418,7 @@ const uploadThumbnail = async (youtube, videoId, thumbnailPath) => {
  * @param {string} productUrl - Amazon product URL (optional)
  * @param {Object} options - Upload options
  * @param {string} options.thumbnailPath - Path to custom thumbnail (optional)
+ * @param {boolean} options.isShorts - Whether this is a YouTube Shorts video (optional)
  * @returns {Promise<Object>} - Upload result with video ID and URL
  * @throws {Error} When upload fails
  */
@@ -414,7 +436,8 @@ export const uploadToYouTube = async (
   // Validate environment
   const credentials = validateEnvironment();
   
-  console.log(`Uploading video to YouTube: ${title}`);
+  const videoType = options.isShorts ? 'YouTube Shorts' : 'YouTube';
+  console.log(`Uploading video to ${videoType}: ${title}`);
   
   try {
     // Create OAuth2 client
@@ -430,7 +453,8 @@ export const uploadToYouTube = async (
     const completeDescription = buildDescription(
       description,
       productUrl,
-      credentials.AFFILIATE_TAG
+      credentials.AFFILIATE_TAG,
+      options.isShorts
     );
     
     // Merge options with defaults
@@ -510,6 +534,247 @@ export const getUploadQuota = async () => {
     };
   } catch (error) {
     throw new Error(`Failed to check quota: ${error.message}`);
+  }
+};
+
+/**
+ * Uploads video specifically to YouTube Shorts with optimized settings and Shorts URL
+ * @param {string} videoPath - Path to short video file
+ * @param {string} title - Video title (will be optimized for Shorts)
+ * @param {string} description - Video description (will be optimized for Shorts)
+ * @param {string} productUrl - Amazon product URL (optional)
+ * @param {Object} options - Upload options
+ * @returns {Promise<Object>} - Upload result with video ID and Shorts URL
+ * @throws {Error} When upload fails
+ */
+export const uploadToYouTubeShorts = async (
+  videoPath,
+  title,
+  description = '',
+  productUrl = '',
+  options = {}
+) => {
+  // Validate inputs
+  await validateVideoFile(videoPath);
+  validateMetadata(title, description);
+  
+  // Validate environment
+  const credentials = validateEnvironment();
+  
+  console.log('📱 Uploading to YouTube Shorts...');
+  
+  try {
+    // Create OAuth2 client
+    const auth = createOAuth2Client(credentials);
+    
+    // Create YouTube API client
+    const youtube = google.youtube({
+      version: 'v3',
+      auth
+    });
+    
+    // Optimize title for Shorts
+    let shortsTitle = title;
+    if (!shortsTitle.includes('#Shorts')) {
+      // Keep title concise for Shorts (under 60 characters is ideal)
+      if (shortsTitle.length > 50) {
+        shortsTitle = shortsTitle.substring(0, 47) + '...';
+      }
+      shortsTitle += ' #Shorts';
+    }
+    
+    // Build complete description with affiliate link for Shorts
+    const completeDescription = buildDescription(
+      description,
+      productUrl,
+      credentials.AFFILIATE_TAG,
+      true // isShorts = true
+    );
+    
+    // Optimize options for YouTube Shorts
+    const shortsOptions = {
+      ...options,
+      tags: [...(options.tags || []), 'Shorts', 'Short', 'Vertical', 'QuickReview', 'YouTubeShorts'],
+      categoryId: '24' // Entertainment category works better for Shorts
+    };
+    
+    // Merge options with defaults
+    const metadata = { ...DEFAULT_METADATA, ...shortsOptions };
+    
+    // Prepare request body with Shorts-specific optimizations
+    const requestBody = {
+      snippet: {
+        title: shortsTitle.trim(),
+        description: completeDescription,
+        tags: metadata.tags,
+        categoryId: metadata.categoryId,
+        defaultLanguage: metadata.defaultLanguage
+      },
+      status: {
+        privacyStatus: metadata.privacyStatus,
+        selfDeclaredMadeForKids: false,
+        // Add Shorts-specific metadata
+        madeForKids: false
+      }
+    };
+    
+    // Upload video with Shorts optimization
+    const response = await uploadWithRetry(
+      youtube,
+      requestBody,
+      videoPath,
+      options
+    );
+    
+    const videoData = response.data;
+    const videoId = videoData.id;
+    
+    // Generate Shorts-specific URL
+    const shortsUrl = `https://youtube.com/shorts/${videoId}`;
+    const regularUrl = `https://youtu.be/${videoId}`;
+    
+    console.log(`📱 YouTube Shorts uploaded successfully: ${shortsUrl}`);
+    
+    // Upload custom thumbnail if provided
+    let thumbnailUploaded = false;
+    if (options.thumbnailPath) {
+      thumbnailUploaded = await uploadThumbnail(youtube, videoId, options.thumbnailPath);
+    }
+    
+    return {
+      videoId,
+      url: shortsUrl, // Return Shorts URL
+      regularUrl: regularUrl, // Also provide regular URL
+      title: videoData.snippet.title,
+      description: videoData.snippet.description,
+      status: videoData.status.uploadStatus,
+      privacyStatus: videoData.status.privacyStatus,
+      thumbnailUploaded,
+      isShorts: true
+    };
+    
+  } catch (error) {
+    throw new Error(`YouTube Shorts upload failed: ${error.message}`);
+  }
+};
+
+/**
+ * Uploads both long-form and short-form videos to YouTube automatically
+ * @param {string} longVideoPath - Path to long-form video file
+ * @param {string} shortVideoPath - Path to short-form video file
+ * @param {string} title - Base video title
+ * @param {string} description - Video description
+ * @param {string} productUrl - Amazon product URL (optional)
+ * @param {Object} options - Upload options
+ * @param {string} options.thumbnailPath - Path to custom thumbnail for long video (optional)
+ * @param {string} options.shortThumbnailPath - Path to custom thumbnail for short video (optional)
+ * @param {boolean} options.publishBoth - Whether to publish both videos (default: true)
+ * @returns {Promise<Object>} - Upload results for both videos
+ * @throws {Error} When upload fails
+ */
+export const uploadBothVideosToYouTube = async (
+  longVideoPath,
+  shortVideoPath,
+  title,
+  description = '',
+  productUrl = '',
+  options = {}
+) => {
+  const results = {
+    longVideo: null,
+    shortVideo: null,
+    success: false,
+    errors: []
+  };
+
+  try {
+    console.log('🎬 Starting dual video upload to YouTube...');
+    console.log(`📹 Long video: ${longVideoPath}`);
+    console.log(`📱 Short video: ${shortVideoPath}`);
+    console.log('');
+
+    // Upload long-form video first
+    console.log('📹 Uploading long-form video...');
+    try {
+      const longVideoOptions = {
+        ...options,
+        thumbnailPath: options.thumbnailPath,
+        tags: [...(options.tags || [])],
+        onProgress: (progress) => {
+          if (options.onProgress) {
+            options.onProgress({
+              ...progress,
+              type: 'long',
+              message: `Long video: ${Math.round(progress.percent || 0)}%`
+            });
+          }
+        }
+      };
+
+      results.longVideo = await uploadToYouTube(
+        longVideoPath,
+        title,
+        description,
+        productUrl,
+        longVideoOptions
+      );
+
+      console.log(`✅ Long video uploaded: ${results.longVideo.url}`);
+    } catch (error) {
+      console.error(`❌ Long video upload failed: ${error.message}`);
+      results.errors.push({ type: 'long', error: error.message });
+    }
+
+    // Upload short-form video as YouTube Shorts
+    try {
+      const shortVideoOptions = {
+        ...options,
+        thumbnailPath: options.shortThumbnailPath,
+        onProgress: (progress) => {
+          if (options.onProgress) {
+            options.onProgress({
+              ...progress,
+              type: 'short',
+              message: `YouTube Shorts: ${Math.round(progress.percent || 0)}%`
+            });
+          }
+        }
+      };
+
+      results.shortVideo = await uploadToYouTubeShorts(
+        shortVideoPath,
+        title,
+        description,
+        productUrl,
+        shortVideoOptions
+      );
+
+      console.log(`✅ YouTube Shorts uploaded: ${results.shortVideo.url}`);
+    } catch (error) {
+      console.error(`❌ YouTube Shorts upload failed: ${error.message}`);
+      results.errors.push({ type: 'short', error: error.message });
+    }
+
+    // Determine overall success
+    results.success = results.longVideo !== null || results.shortVideo !== null;
+
+    if (results.success) {
+      console.log('\n🎉 Dual video upload completed!');
+      if (results.longVideo) {
+        console.log(`📹 Long-form video: ${results.longVideo.url}`);
+      }
+      if (results.shortVideo) {
+        console.log(`📱 YouTube Shorts: ${results.shortVideo.url}`);
+      }
+    } else {
+      console.log('\n❌ Both video uploads failed');
+    }
+
+    return results;
+
+  } catch (error) {
+    results.errors.push({ type: 'general', error: error.message });
+    throw new Error(`Dual video upload failed: ${error.message}`);
   }
 };
 

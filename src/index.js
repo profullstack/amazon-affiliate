@@ -5,7 +5,7 @@ import { generateVoiceover } from './voiceover-generator.js';
 import { generateAIReviewScript, generateAIVideoTitle, generateAIVideoDescription, generateAIShortVideoScript } from './openai-script-generator.js';
 import { createSlideshow, createShortVideo } from './video-creator.js';
 import { createThumbnail } from './thumbnail-generator.js';
-import { uploadToYouTube } from './youtube-publisher.js';
+import { uploadToYouTube, uploadBothVideosToYouTube } from './youtube-publisher.js';
 import { PromotionManager } from './promotion-manager.js';
 import { writeVideoDescription } from './description-writer.js';
 import fs from 'fs/promises';
@@ -22,7 +22,8 @@ const DEFAULT_OPTIONS = {
   onProgress: null,
   autoPromote: false,
   promotionPlatforms: ['reddit', 'pinterest', 'twitter'],
-  createShortVideo: true
+  createShortVideo: true,
+  publishBothVideos: true // New option to control dual publishing
 };
 
 /**
@@ -345,7 +346,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     
     const voiceoverPath = await generateVoiceover(
       voiceoverText,
-      `${config.tempDir}/voiceover.mp3`
+      `${config.tempDir}/voiceover.mp3`,
+      undefined, // Use default voice settings
+      config.voiceGender
     );
     
     timings.voiceoverGeneration.end = Date.now();
@@ -416,7 +419,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         console.log('🎤 Generating short video voiceover...');
         shortVoiceoverPath = await generateVoiceover(
           shortVideoScript,
-          `${config.tempDir}/short-voiceover.mp3`
+          `${config.tempDir}/short-voiceover.mp3`,
+          undefined, // Use default voice settings
+          config.voiceGender
         );
         tempFiles.push(shortVoiceoverPath);
         console.log(`✅ Short video voiceover generated: ${shortVoiceoverPath}`);
@@ -611,15 +616,6 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
       reportProgress(config.onProgress, 'youtubeUpload', 90, 'Uploading to YouTube');
       timings.youtubeUpload = { start: Date.now() };
       
-      const uploadOptions = {
-        thumbnailPath: finalThumbnailPath, // Pass thumbnail path for upload
-        onProgress: progress => {
-          const overallProgress = 90 + (progress.percent || 0) * 0.10;
-          reportProgress(config.onProgress, 'youtubeUpload', overallProgress,
-            `Uploading: ${Math.round(progress.percent || 0)}%`);
-        }
-      };
-
       // Use clean description for YouTube (read from .txt file if available)
       let youtubeDescription = videoDescription;
       if (descriptionFilePath) {
@@ -634,16 +630,73 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         }
       }
 
-      const uploadResult = await uploadToYouTube(
-        finalVideoPath,
-        videoTitle,
-        youtubeDescription,
-        productUrl,
-        uploadOptions
-      );
-      
-      timings.youtubeUpload.end = Date.now();
-      console.log(`✅ Video uploaded to YouTube: ${uploadResult.url}`);
+      let uploadResult;
+
+      // Check if we should upload both videos (when short video exists and dual publishing is enabled)
+      if (shortVideoPath && config.publishBothVideos) {
+        console.log('🎬 Dual video upload enabled - uploading both long and short videos');
+        
+        const dualUploadOptions = {
+          thumbnailPath: finalThumbnailPath,
+          shortThumbnailPath: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.thumb.jpg` : null,
+          tags: ['Amazon', 'Affiliate', 'Review'],
+          categoryId: '26',
+          privacyStatus: 'public',
+          onProgress: progress => {
+            const overallProgress = 90 + (progress.percent || 0) * 0.10;
+            reportProgress(config.onProgress, 'youtubeUpload', overallProgress,
+              progress.message || `Uploading: ${Math.round(progress.percent || 0)}%`);
+          }
+        };
+
+        uploadResult = await uploadBothVideosToYouTube(
+          finalVideoPath,
+          shortVideoPath,
+          videoTitle,
+          youtubeDescription,
+          productUrl,
+          dualUploadOptions
+        );
+        
+        timings.youtubeUpload.end = Date.now();
+        
+        if (uploadResult.success) {
+          if (uploadResult.longVideo && uploadResult.shortVideo) {
+            console.log(`✅ Both videos uploaded successfully!`);
+            console.log(`📹 Long video: ${uploadResult.longVideo.url}`);
+            console.log(`📱 Short video: ${uploadResult.shortVideo.url}`);
+          } else if (uploadResult.longVideo) {
+            console.log(`✅ Long video uploaded: ${uploadResult.longVideo.url}`);
+            console.warn('⚠️ Short video upload failed');
+          } else if (uploadResult.shortVideo) {
+            console.log(`✅ Short video uploaded: ${uploadResult.shortVideo.url}`);
+            console.warn('⚠️ Long video upload failed');
+          }
+        } else {
+          throw new Error('Both video uploads failed');
+        }
+      } else {
+        // Single video upload (original behavior)
+        const uploadOptions = {
+          thumbnailPath: finalThumbnailPath,
+          onProgress: progress => {
+            const overallProgress = 90 + (progress.percent || 0) * 0.10;
+            reportProgress(config.onProgress, 'youtubeUpload', overallProgress,
+              `Uploading: ${Math.round(progress.percent || 0)}%`);
+          }
+        };
+
+        uploadResult = await uploadToYouTube(
+          finalVideoPath,
+          videoTitle,
+          youtubeDescription,
+          productUrl,
+          uploadOptions
+        );
+        
+        timings.youtubeUpload.end = Date.now();
+        console.log(`✅ Video uploaded to YouTube: ${uploadResult.url}`);
+      }
       
       // Step 11: Promote video (if enabled)
       let promotionResults = null;
@@ -706,11 +759,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         }
       }
       
-      // Return success result with YouTube URL
+      // Return success result with YouTube URL(s)
       const successResult = {
         success: true,
-        videoId: uploadResult.videoId,
-        youtubeUrl: uploadResult.url,
         productTitle: productData.title,
         videoTitle,
         timing: createTimingInfo(timings),
@@ -730,6 +781,21 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           videoSize: await fs.stat(finalVideoPath).then(s => s.size).catch(() => 0)
         }
       };
+
+      // Handle dual upload results
+      if (uploadResult.longVideo || uploadResult.shortVideo) {
+        // Dual upload result
+        successResult.dualUpload = true;
+        successResult.longVideo = uploadResult.longVideo;
+        successResult.shortVideo = uploadResult.shortVideo;
+        successResult.youtubeUrl = uploadResult.longVideo?.url || uploadResult.shortVideo?.url;
+        successResult.videoId = uploadResult.longVideo?.videoId || uploadResult.shortVideo?.videoId;
+      } else {
+        // Single upload result
+        successResult.dualUpload = false;
+        successResult.videoId = uploadResult.videoId;
+        successResult.youtubeUrl = uploadResult.url;
+      }
       
       // Cleanup temporary files (after all video creation is complete)
       if (config.cleanup) {
@@ -839,6 +905,10 @@ Options:
   --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter)
   --create-short-video     Create a 30-second short video for social media (default: true)
   --no-short-video         Disable short video creation
+  --publish-both-videos    Publish both long and short videos to YouTube (default: true)
+  --no-dual-publish        Disable dual publishing (upload only long video)
+  --woman                  Use female voice for voiceover generation
+  --man                    Use male voice for voiceover generation
 
 Examples:
   # Using full URL
@@ -901,6 +971,23 @@ Examples:
         break;
       case '--no-short-video':
         options.createShortVideo = false;
+        i--; // No value for this flag
+        break;
+      case '--publish-both-videos':
+        options.publishBothVideos = true;
+        i--; // No value for this flag
+        break;
+      case '--no-dual-publish':
+        options.publishBothVideos = false;
+        i--; // No value for this flag
+        break;
+      case '--woman':
+        options.voiceGender = 'female';
+        i--; // No value for this flag
+        break;
+      case '--man':
+      case '--male':
+        options.voiceGender = 'male';
         i--; // No value for this flag
         break;
     }

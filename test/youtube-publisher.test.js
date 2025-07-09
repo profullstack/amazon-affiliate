@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs/promises';
-import { uploadToYouTube } from '../src/youtube-publisher.js';
+import { uploadToYouTube, uploadToYouTubeShorts } from '../src/youtube-publisher.js';
 
 // Mock the google module
 const mockGoogle = {
@@ -384,5 +384,196 @@ This helps support the channel at no extra cost to you!
         expect(finalDescription).to.equal(existingDescription);
       });
     });
+
+    describe('buildDescription with Shorts optimization', () => {
+      it('should create concise description for Shorts', async () => {
+        const longDescription = 'This is a very long description that should be truncated for YouTube Shorts to keep it under the recommended character limit for better visibility and engagement.';
+        
+        await uploadToYouTube('video.mp4', 'Title', longDescription, 'https://amazon.com/product', { isShorts: true });
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+        
+        expect(finalDescription).to.include('This is a very long description that should be truncated for YouTube Shorts to keep it under...');
+        expect(finalDescription).to.include('#Shorts #Short #Vertical #QuickReview');
+        expect(finalDescription).to.include('🛒 https://amazon.com/product?tag=test-affiliate-tag');
+      });
+
+      it('should add Shorts hashtags when not present', async () => {
+        await uploadToYouTube('video.mp4', 'Title', 'Short product review', '', { isShorts: true });
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+        
+        expect(finalDescription).to.include('#Shorts #Short #Vertical #QuickReview');
+      });
+
+      it('should not duplicate Shorts hashtags', async () => {
+        await uploadToYouTube('video.mp4', 'Title', 'Product review #Shorts', '', { isShorts: true });
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+        
+        const shortsCount = (finalDescription.match(/#Shorts/g) || []).length;
+        expect(shortsCount).to.equal(1);
+      });
+
+      it('should use shorter affiliate content for Shorts', async () => {
+        await uploadToYouTube('video.mp4', 'Title', 'Product review', 'https://amazon.com/product', { isShorts: true });
+
+        const mockYouTube = googleStub.youtube();
+        const uploadCall = mockYouTube.videos.insert.getCall(0);
+        const finalDescription = uploadCall.args[0].requestBody.snippet.description;
+        
+        expect(finalDescription).to.include('🛒 https://amazon.com/product?tag=test-affiliate-tag');
+        expect(finalDescription).to.include('⚠️ As an Amazon Associate, I earn from qualifying purchases.');
+        expect(finalDescription).not.to.include('This helps support the channel at no extra cost to you!');
+      });
+    });
   });
 });
+  describe('uploadToYouTubeShorts', () => {
+    let googleStub;
+    let fsStub;
+    let processStub;
+
+    beforeEach(() => {
+      // Mock Google APIs
+      const mockYouTube = {
+        videos: {
+          insert: sinon.stub()
+        },
+        thumbnails: {
+          set: sinon.stub().resolves({ status: 200 })
+        }
+      };
+
+      googleStub = {
+        youtube: sinon.stub().returns(mockYouTube),
+        auth: {
+          OAuth2: sinon.stub()
+        }
+      };
+
+      // Mock fs module
+      fsStub = sinon.stub(fs, 'stat');
+      fsStub.resolves({ size: 10485760 }); // 10MB file
+
+      // Mock environment variables
+      processStub = sinon.stub(process, 'env').value({
+        YOUTUBE_CLIENT_ID: 'test-client-id',
+        YOUTUBE_CLIENT_SECRET: 'test-client-secret',
+        YOUTUBE_OAUTH2_ACCESS_TOKEN: 'test-access-token',
+        AFFILIATE_TAG: 'test-affiliate-tag'
+      });
+
+      // Mock successful upload response
+      mockYouTube.videos.insert.resolves({
+        data: {
+          id: 'test-shorts-id',
+          snippet: {
+            title: 'Test Shorts Video #Shorts',
+            description: 'Test Description'
+          },
+          status: {
+            uploadStatus: 'uploaded',
+            privacyStatus: 'public'
+          }
+        }
+      });
+    });
+
+    afterEach(() => {
+      sinon.restore();
+    });
+
+    it('should optimize title and description for Shorts and return Shorts URL', async () => {
+      const mockYouTube = googleStub.youtube();
+      mockYouTube.videos.insert.resolves({
+        data: {
+          id: 'shorts123',
+          snippet: {
+            title: 'Test Video #Shorts',
+            description: 'Short description\n\n#Shorts #Short #Vertical #QuickReview'
+          },
+          status: {
+            uploadStatus: 'uploaded',
+            privacyStatus: 'public'
+          }
+        }
+      });
+
+      const result = await uploadToYouTubeShorts(
+        '/path/to/short-video.mp4',
+        'Test Video',
+        'Short description'
+      );
+
+      expect(result).to.have.property('videoId', 'shorts123');
+      expect(result).to.have.property('url', 'https://youtube.com/shorts/shorts123');
+      expect(result).to.have.property('regularUrl', 'https://youtu.be/shorts123');
+      expect(result).to.have.property('isShorts', true);
+      expect(result.title).to.include('#Shorts');
+      expect(result.description).to.include('#Shorts');
+    });
+
+    it('should handle long titles by truncating for Shorts', async () => {
+      const longTitle = 'This is a very long title that exceeds the recommended length for YouTube Shorts videos';
+      
+      const mockYouTube = googleStub.youtube();
+      mockYouTube.videos.insert.resolves({
+        data: {
+          id: 'shorts456',
+          snippet: {
+            title: 'This is a very long title that exceeds the r... #Shorts',
+            description: 'Test description'
+          },
+          status: {
+            uploadStatus: 'uploaded',
+            privacyStatus: 'public'
+          }
+        }
+      });
+
+      const result = await uploadToYouTubeShorts(
+        '/path/to/short-video.mp4',
+        longTitle,
+        'Test description'
+      );
+
+      expect(result.title).to.have.length.at.most(60);
+      expect(result.title).to.include('#Shorts');
+      expect(result.url).to.include('youtube.com/shorts/');
+    });
+
+    it('should use Entertainment category for better Shorts performance', async () => {
+      const mockYouTube = googleStub.youtube();
+      mockYouTube.videos.insert.resolves({
+        data: {
+          id: 'shorts789',
+          snippet: {
+            title: 'Test Video #Shorts',
+            description: 'Test description',
+            categoryId: '24'
+          },
+          status: {
+            uploadStatus: 'uploaded',
+            privacyStatus: 'public'
+          }
+        }
+      });
+
+      await uploadToYouTubeShorts(
+        '/path/to/short-video.mp4',
+        'Test Video',
+        'Test description'
+      );
+
+      // Verify that the upload was called with Entertainment category (24)
+      const uploadCall = mockYouTube.videos.insert.getCall(0);
+      expect(uploadCall.args[0].requestBody.snippet.categoryId).to.equal('24');
+    });
+  });
