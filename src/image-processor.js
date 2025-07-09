@@ -183,15 +183,15 @@ export async function createStylishThumbnail(imagePath, title, outputPath, optio
   const {
     width = 1280,
     height = 720,
-    fontSize = 72,
-    fontFamily = 'Adwaita-Sans-Black', // Bold, impactful font
+    fontSize = 76,
+    fontFamily = 'Poppins-ExtraBold', // Solid, bold font for maximum readability
     textColor = 'white',
     strokeColor = 'black',
-    strokeWidth = 3,
-    shadowOffset = 5,
-    shadowBlur = 10,
-    shadowOpacity = 0.8,
-    position = 'bottom', // 'top', 'bottom', 'center'
+    strokeWidth = 4,
+    shadowOffset = 6,
+    shadowBlur = 12,
+    shadowOpacity = 0.9,
+    position = 'center', // 'top', 'bottom', 'center'
     maxLines = 2
   } = options;
 
@@ -302,11 +302,25 @@ export async function createStylishThumbnail(imagePath, title, outputPath, optio
         '+repage'
       );
 
-      // Add each line of text
+      // Add each line of text with proper spacing
       lines.forEach((line, index) => {
-        const lineYOffset = yOffset + (index * (fontSize + 10));
+        // Calculate proper line spacing based on font size and position
+        let lineSpacing = Math.round(fontSize * 1.2); // 20% more than font size for readability
+        
+        // Adjust line positioning based on gravity and number of lines
+        let lineYOffset;
+        if (position === 'center') {
+          // For center positioning, distribute lines evenly around center
+          const totalHeight = (lines.length - 1) * lineSpacing;
+          const startOffset = -totalHeight / 2;
+          lineYOffset = startOffset + (index * lineSpacing);
+        } else {
+          // For top/bottom positioning, use original logic with better spacing
+          lineYOffset = yOffset + (index * lineSpacing);
+        }
+        
         textArgs.push(
-          '-annotate', `+0${lineYOffset >= 0 ? '+' : ''}${lineYOffset}`, line
+          '-annotate', `+0${lineYOffset >= 0 ? '+' : ''}${Math.round(lineYOffset)}`, line
         );
       });
 

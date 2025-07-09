@@ -355,15 +355,15 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
         const stylishOptions = {
           width: options.isVertical ? 1080 : 1280,
           height: options.isVertical ? 1920 : 720,
-          fontSize: options.isVertical ? 64 : 72,
-          position: 'bottom',
-          fontFamily: 'Adwaita-Sans-Black',
+          fontSize: options.isVertical ? 68 : 76,
+          position: 'center',
+          fontFamily: 'Poppins-ExtraBold',
           textColor: 'white',
           strokeColor: 'black',
-          strokeWidth: 3,
-          shadowOffset: 5,
-          shadowBlur: 10,
-          shadowOpacity: 0.8
+          strokeWidth: 4,
+          shadowOffset: 6,
+          shadowBlur: 12,
+          shadowOpacity: 0.9
         };
         
         const result = await createStylishThumbnail(

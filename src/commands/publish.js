@@ -66,6 +66,11 @@ const FLAG_DEFINITIONS = {
     type: 'boolean',
     default: false,
     description: 'Check upload quota before uploading'
+  },
+  'shorts': {
+    type: 'boolean',
+    default: false,
+    description: 'Optimize upload for YouTube Shorts (adds #Shorts hashtag and validates format)'
   }
 };
 
@@ -107,16 +112,17 @@ Arguments:
   <video-path>                Path to video file to upload
 
 Options:
-  --title <title>             Video title (required)
+  --title <title>             Video title (auto-detected from .txt file if available)
   --description <desc>        Video description
   --description-file <path>   Path to file containing video description
   --tags <tags>               Comma-separated video tags (default: Amazon,Affiliate,Review)
   --category <id>             YouTube category ID (default: 26 - Howto & Style)
   --privacy <status>          Privacy status: public, unlisted, private (default: public)
-  --thumbnail <path>          Path to custom thumbnail image
+  --thumbnail <path>          Path to custom thumbnail image (auto-detected if available)
   --product-url <url>         Amazon product URL for affiliate link in description
   --auto-confirm             Skip confirmation prompts
   --check-quota              Check upload quota before uploading
+  --shorts                   Optimize upload for YouTube Shorts (adds #Shorts hashtag)
 
 Privacy Options:
   public                      Video is visible to everyone
@@ -133,7 +139,10 @@ Common Categories:
   27  Education               28  Science & Technology
 
 Examples:
-  # Upload with basic information
+  # Upload with auto-detected title (from corresponding .txt file)
+  aff publish ./output/my-video.mp4
+
+  # Upload with custom title (overrides auto-detection)
   aff publish ./output/my-video.mp4 --title "Amazing Product Review"
 
   # Upload with full details
@@ -160,6 +169,15 @@ Examples:
   aff publish ./output/video.mp4 \\
     --title "Product Review" \\
     --check-quota
+
+  # Upload short video as YouTube Shorts (auto-detected from filename)
+  aff publish ./output/product-review-short.mp4 \\
+    --title "Quick Product Review"
+  
+  # Or manually enable Shorts optimization
+  aff publish ./output/product-review.mp4 \\
+    --title "Quick Product Review" \\
+    --shorts
 
 Special Commands:
   aff publish quota           Check current upload quota
@@ -246,24 +264,353 @@ const loadDescription = async (options) => {
 };
 
 /**
+ * Attempts to automatically extract title and description from corresponding .txt file
+ * @param {string} videoPath - Path to video file
+ * @returns {Promise<{title: string|null, description: string|null, txtPath: string|null}>} - Extracted data or null if not found
+ */
+const extractTitleAndDescriptionFromFile = async (videoPath) => {
+  try {
+    const { readdir } = await import('fs/promises');
+    
+    // Get the directory and base name of the video
+    const videoDir = videoPath.substring(0, videoPath.lastIndexOf('/')) || '.';
+    const videoFileName = videoPath.substring(videoPath.lastIndexOf('/') + 1);
+    const videoBaseName = videoFileName.replace(/\.[^/.]+$/, '');
+    
+    // Read all .txt files in the directory
+    let txtFiles;
+    try {
+      const allFiles = await readdir(videoDir);
+      txtFiles = allFiles.filter(file => file.endsWith('.txt'));
+    } catch (error) {
+      return { title: null, description: null, txtPath: null };
+    }
+    
+    // Try to find a matching .txt file using various strategies
+    const matchingStrategies = [
+      // Strategy 1: Exact match (video-name.txt)
+      {
+        name: 'Exact match',
+        matcher: (txtFile) => txtFile === `${videoBaseName}.txt`
+      },
+      
+      // Strategy 2: Short video match (video-123456-short.mp4 -> video-123456-short.txt)
+      {
+        name: 'Short video exact match',
+        matcher: (txtFile) => {
+          const txtBaseName = txtFile.replace('.txt', '');
+          return txtBaseName === videoBaseName;
+        }
+      },
+      
+      // Strategy 3: Remove numbers but keep short suffix (video-123456-short.mp4 -> video-short.txt)
+      {
+        name: 'Remove numbers, keep short',
+        matcher: (txtFile) => {
+          const txtBaseName = txtFile.replace('.txt', '');
+          const isVideoShort = videoBaseName.endsWith('-short');
+          const isTxtShort = txtBaseName.endsWith('-short');
+          
+          if (isVideoShort && isTxtShort) {
+            const videoWithoutNumbers = videoBaseName.replace(/-\d+(-short)$/, '$1');
+            const txtWithoutNumbers = txtBaseName.replace(/-\d+(-short)$/, '$1');
+            return videoWithoutNumbers === txtWithoutNumbers;
+          }
+          
+          return false;
+        }
+      },
+      
+      // Strategy 4: Fuzzy match - same base words (ignoring numbers)
+      {
+        name: 'Fuzzy word match',
+        matcher: (txtFile) => {
+          const txtBaseName = txtFile.replace('.txt', '');
+          
+          // Split into words and check if both are short or both are regular
+          const isVideoShort = videoBaseName.endsWith('-short');
+          const isTxtShort = txtBaseName.endsWith('-short');
+          
+          // Only match if both are short or both are regular
+          if (isVideoShort !== isTxtShort) {
+            return false;
+          }
+          
+          // Remove numbers and short suffix for comparison
+          const videoWords = videoBaseName.replace(/-\d+(-short)?$/, '$1').split('-');
+          const txtWords = txtBaseName.replace(/-\d+(-short)?$/, '$1').split('-');
+          
+          // Filter out numbers and short suffix
+          const videoMainWords = videoWords.filter(word => !/^\d+$/.test(word) && word !== 'short');
+          const txtMainWords = txtWords.filter(word => !/^\d+$/.test(word) && word !== 'short');
+          
+          // Need at least 3 main words to match
+          if (videoMainWords.length < 3 || txtMainWords.length < 3) {
+            return false;
+          }
+          
+          // Check if the main words match (first 3-4 words)
+          const wordsToCompare = Math.min(videoMainWords.length, txtMainWords.length, 4);
+          for (let i = 0; i < wordsToCompare; i++) {
+            if (videoMainWords[i] !== txtMainWords[i]) {
+              return false;
+            }
+          }
+          
+          return true;
+        }
+      },
+      
+      // Strategy 5: Handle hyphen variations (18piece vs 18-piece)
+      {
+        name: 'Hyphen variation match',
+        matcher: (txtFile) => {
+          const txtBaseName = txtFile.replace('.txt', '');
+          
+          // Split into words and check if both are short or both are regular
+          const isVideoShort = videoBaseName.endsWith('-short');
+          const isTxtShort = txtBaseName.endsWith('-short');
+          
+          // Only match if both are short or both are regular
+          if (isVideoShort !== isTxtShort) {
+            return false;
+          }
+          
+          // Normalize hyphens (18piece -> 18-piece, etc.)
+          const normalizeHyphens = (str) => {
+            return str
+              .replace(/(\d+)([a-z])/gi, '$1-$2')  // Add hyphen between number and letter
+              .replace(/-+/g, '-')                 // Collapse multiple hyphens
+              .replace(/-\d+(-short)?$/, '$1');    // Remove trailing numbers but keep -short
+          };
+          
+          const normalizedVideo = normalizeHyphens(videoBaseName);
+          const normalizedTxt = normalizeHyphens(txtBaseName);
+          
+          // Split into words for comparison
+          const videoWords = normalizedVideo.split('-').filter(word => !/^\d+$/.test(word) && word !== 'short');
+          const txtWords = normalizedTxt.split('-').filter(word => !/^\d+$/.test(word) && word !== 'short');
+          
+          // Need at least 3 main words to match
+          if (videoWords.length < 3 || txtWords.length < 3) {
+            return false;
+          }
+          
+          // Check if the main words match (first 3-4 words)
+          const wordsToCompare = Math.min(videoWords.length, txtWords.length, 4);
+          for (let i = 0; i < wordsToCompare; i++) {
+            if (videoWords[i] !== txtWords[i]) {
+              return false;
+            }
+          }
+          
+          return true;
+        }
+      }
+    ];
+    
+    // Try each strategy to find a matching .txt file
+    for (const strategy of matchingStrategies) {
+      const matchingTxtFile = txtFiles.find(strategy.matcher);
+      
+      if (matchingTxtFile) {
+        const txtPath = `${videoDir}/${matchingTxtFile}`;
+        
+        console.log(`✅ Found match using strategy "${strategy.name}": ${matchingTxtFile}`);
+        
+        try {
+          const content = await readFile(txtPath, 'utf-8');
+          const lines = content.split('\n');
+          
+          if (lines.length > 0) {
+            // First line should be the title
+            const title = lines[0].trim();
+            
+            // Remove markdown heading syntax if present
+            const cleanTitle = title.replace(/^#+\s*/, '');
+            
+            // Rest of the content is the description (skip empty first line if title was repeated)
+            let descriptionLines = lines.slice(1);
+            
+            // If second line is the same as title, skip it too
+            if (descriptionLines.length > 0 && descriptionLines[0].trim() === cleanTitle) {
+              descriptionLines = descriptionLines.slice(1);
+            }
+            
+            // Skip any empty lines at the beginning
+            while (descriptionLines.length > 0 && !descriptionLines[0].trim()) {
+              descriptionLines = descriptionLines.slice(1);
+            }
+            
+            const description = descriptionLines.join('\n').trim();
+            
+            if (cleanTitle.length > 0) {
+              console.log(`📝 Auto-detected title from ${txtPath}: "${cleanTitle}"`);
+              if (description.length > 0) {
+                console.log(`📄 Auto-detected description from ${txtPath} (${description.length} characters)`);
+              }
+              return { title: cleanTitle, description: description || null, txtPath };
+            }
+          }
+        } catch (error) {
+          // File can't be read, continue to next strategy
+          console.log(`❌ Failed to read ${txtPath}: ${error.message}`);
+          continue;
+        }
+      } else {
+        console.log(`❌ No match found using strategy "${strategy.name}"`);
+      }
+    }
+    
+    return { title: null, description: null, txtPath: null };
+  } catch (error) {
+    return { title: null, description: null, txtPath: null };
+  }
+};
+
+/**
+ * Attempts to automatically detect thumbnail based on video filename
+ * @param {string} videoPath - Path to video file
+ * @returns {Promise<string|null>} - Thumbnail path or null if not found
+ */
+const autoDetectThumbnail = async (videoPath) => {
+  try {
+    // Get the base name without extension
+    const baseName = videoPath.replace(/\.[^/.]+$/, '');
+    
+    // Check if this is a short video
+    const isShortVideo = baseName.includes('-short');
+    
+    // Try to find corresponding thumbnail file
+    const possiblePaths = [];
+    
+    if (isShortVideo) {
+      // For short videos, try various short thumbnail patterns
+      possiblePaths.push(
+        `${baseName}-thumbnail.jpg`,           // product-123456-short-thumbnail.jpg
+        `${baseName.replace('-short', '')}-short-thumbnail.jpg`, // product-123456-short-thumbnail.jpg
+        `${baseName}.thumb.jpg`,               // product-123456-short.thumb.jpg
+        `${baseName}-thumb.jpg`,               // product-123456-short-thumb.jpg
+        `${baseName.replace('-short', '')}-thumbnail.jpg` // fallback to regular thumbnail
+      );
+    } else {
+      // For regular videos, try thumbnail.jpg first
+      possiblePaths.push(
+        `${baseName}-thumbnail.jpg`,
+        `${baseName}.thumbnail.jpg`,
+        videoPath.replace(/\.mp4$/, '-thumbnail.jpg'),
+        videoPath.replace(/\.mov$/, '-thumbnail.jpg'),
+        videoPath.replace(/\.avi$/, '-thumbnail.jpg')
+      );
+    }
+    
+    for (const thumbnailPath of possiblePaths) {
+      try {
+        await validateFile(thumbnailPath, 'Thumbnail');
+        console.log(`🖼️  Auto-detected thumbnail: ${thumbnailPath}`);
+        return thumbnailPath;
+      } catch (error) {
+        // File doesn't exist or can't be read, continue to next possibility
+        continue;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+/**
+ * Validates and optimizes video for YouTube Shorts
+ * @param {string} videoPath - Path to video file
+ * @param {Object} options - Upload options
+ * @returns {Promise<Object>} - Updated options optimized for Shorts
+ */
+const validateAndOptimizeForShorts = async (videoPath, options) => {
+  if (!options.shorts) {
+    return options;
+  }
+
+  console.log('📱 Optimizing for YouTube Shorts...');
+  
+  // Check if video appears to be a short video (contains -short in filename)
+  const isShortVideo = videoPath.includes('-short');
+  
+  if (isShortVideo) {
+    console.log('✅ Detected short video format from filename');
+  } else {
+    displayWarning('Video filename does not contain "-short" - ensure this is a vertical video under 60 seconds');
+  }
+
+  // Create optimized options for Shorts
+  const shortsOptions = { ...options };
+  
+  // Add #Shorts hashtag to title if not already present
+  if (shortsOptions.title && !shortsOptions.title.includes('#Shorts')) {
+    shortsOptions.title = `${shortsOptions.title} #Shorts`;
+    console.log('📝 Added #Shorts hashtag to title for better discoverability');
+  }
+  
+  // Add Shorts-specific tags
+  const shortsSpecificTags = ['Shorts', 'Short', 'Vertical'];
+  const currentTags = shortsOptions.tags || [];
+  const newTags = [...currentTags];
+  
+  shortsSpecificTags.forEach(tag => {
+    if (!newTags.some(existingTag => existingTag.toLowerCase() === tag.toLowerCase())) {
+      newTags.push(tag);
+    }
+  });
+  
+  shortsOptions.tags = newTags;
+  console.log('🏷️  Added Shorts-specific tags for better categorization');
+  
+  // Prefer vertical thumbnail for Shorts
+  if (!shortsOptions.thumbnail) {
+    const autoThumbnail = await autoDetectThumbnail(videoPath);
+    if (autoThumbnail) {
+      shortsOptions.thumbnail = autoThumbnail;
+      console.log('🖼️  Using vertical thumbnail optimized for Shorts');
+    }
+  }
+  
+  console.log('🎯 YouTube Shorts optimization complete');
+  
+  return shortsOptions;
+};
+
+/**
  * Prompts user for missing upload information
+ * @param {string} videoPath - Path to video file
  * @param {Object} options - Current options
  * @returns {Promise<Object>} - Complete options
  */
-const promptForMissingInfo = async (options) => {
+const promptForMissingInfo = async (videoPath, options) => {
   const completeOptions = { ...options };
 
+  // Try to auto-extract title and description from .txt file first
+  const autoData = await extractTitleAndDescriptionFromFile(videoPath);
+  
   if (!completeOptions.title) {
-    completeOptions.title = await promptUserInput('Enter video title');
-    if (!completeOptions.title) {
-      exitWithError('Video title is required for upload');
+    if (autoData.title) {
+      completeOptions.title = autoData.title;
+    } else {
+      completeOptions.title = await promptUserInput('Enter video title');
+      if (!completeOptions.title) {
+        exitWithError('Video title is required for upload');
+      }
     }
   }
 
   if (!completeOptions.description && !completeOptions['description-file']) {
-    const desc = await promptUserInput('Enter video description (optional)');
-    if (desc.trim()) {
-      completeOptions.description = desc;
+    if (autoData.description) {
+      completeOptions.description = autoData.description;
+    } else {
+      const desc = await promptUserInput('Enter video description (optional)');
+      if (desc.trim()) {
+        completeOptions.description = desc;
+      }
     }
   }
 
@@ -275,9 +622,15 @@ const promptForMissingInfo = async (options) => {
   }
 
   if (!completeOptions.thumbnail) {
-    const thumbnail = await promptUserInput('Enter thumbnail path (optional)');
-    if (thumbnail.trim()) {
-      completeOptions.thumbnail = thumbnail;
+    // Try to auto-detect thumbnail first
+    const autoThumbnail = await autoDetectThumbnail(videoPath);
+    if (autoThumbnail) {
+      completeOptions.thumbnail = autoThumbnail;
+    } else {
+      const thumbnail = await promptUserInput('Enter thumbnail path (optional)');
+      if (thumbnail.trim()) {
+        completeOptions.thumbnail = thumbnail;
+      }
     }
   }
 
@@ -336,6 +689,13 @@ const runUpload = async (videoPath, options) => {
   try {
     console.log('📤 Starting YouTube upload...\n');
 
+    // Auto-detect YouTube Shorts based on filename
+    if (!options.shorts && videoPath.includes('-short.mp4')) {
+      options.shorts = true;
+      console.log('📱 Auto-detected short video format - enabling YouTube Shorts optimization');
+      console.log('');
+    }
+
     // Check quota if requested
     if (options['check-quota']) {
       await checkQuota();
@@ -349,8 +709,36 @@ const runUpload = async (videoPath, options) => {
     // Prompt for missing information if not in auto-confirm mode
     let completeOptions = options;
     if (!options['auto-confirm']) {
-      completeOptions = await promptForMissingInfo(options);
+      completeOptions = await promptForMissingInfo(videoPath, options);
+    } else {
+      // Even in auto-confirm mode, try to extract title, description, and thumbnail if not provided
+      const autoData = await extractTitleAndDescriptionFromFile(videoPath);
+      const updates = {};
+      
+      if (!options.title && autoData.title) {
+        updates.title = autoData.title;
+        console.log(`📝 Auto-detected title: "${autoData.title}"`);
+      }
+      
+      if (!options.description && !options['description-file'] && autoData.description) {
+        updates.description = autoData.description;
+        console.log(`📄 Auto-detected description (${autoData.description.length} characters)`);
+      }
+      
+      if (!options.thumbnail) {
+        const autoThumbnail = await autoDetectThumbnail(videoPath);
+        if (autoThumbnail) {
+          updates.thumbnail = autoThumbnail;
+        }
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        completeOptions = { ...options, ...updates };
+      }
     }
+
+    // Optimize for YouTube Shorts if requested
+    completeOptions = await validateAndOptimizeForShorts(videoPath, completeOptions);
 
     // Load description from file if specified
     const description = await loadDescription(completeOptions);
@@ -373,6 +761,9 @@ const runUpload = async (videoPath, options) => {
     console.log(`   Privacy: ${completeOptions.privacy}`);
     console.log(`   Category: ${completeOptions.category} (${YOUTUBE_CATEGORIES[completeOptions.category] || 'Unknown'})`);
     console.log(`   Tags: ${completeOptions.tags.join(', ')}`);
+    if (completeOptions.shorts) {
+      console.log(`   Format: YouTube Shorts (optimized for mobile)`);
+    }
     if (completeOptions.thumbnail) {
       console.log(`   Thumbnail: ${completeOptions.thumbnail}`);
     }

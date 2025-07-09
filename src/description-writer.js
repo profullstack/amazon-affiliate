@@ -35,6 +35,75 @@ const cleanMarkdownFormatting = (text) => {
 };
 
 /**
+ * Generates relevant hashtags based on video title and content
+ * @param {string} videoTitle - Video title
+ * @param {string} description - Video description content
+ * @returns {string[]} - Array of relevant hashtags
+ */
+const generateHashtags = (videoTitle, description) => {
+  const commonHashtags = [
+    '#Amazon', '#AmazonFinds', '#ProductReview', '#Review',
+    '#Affiliate', '#Shopping', '#Deal', '#Recommendation'
+  ];
+  
+  const contentText = `${videoTitle} ${description}`.toLowerCase();
+  const specificHashtags = [];
+  
+  // Product category hashtags
+  const categoryMap = {
+    'kitchen': ['#Kitchen', '#Cooking', '#KitchenGadgets'],
+    'cookware': ['#Cookware', '#Kitchen', '#Cooking'],
+    'headphones': ['#Headphones', '#Audio', '#Tech'],
+    'wireless': ['#Wireless', '#Tech', '#Bluetooth'],
+    'kayak': ['#Kayak', '#Outdoor', '#Water', '#Fishing'],
+    'fishing': ['#Fishing', '#Outdoor', '#Water'],
+    'outdoor': ['#Outdoor', '#Adventure'],
+    'tech': ['#Tech', '#Technology', '#Gadgets'],
+    'home': ['#Home', '#HomeImprovement'],
+    'fitness': ['#Fitness', '#Health', '#Workout'],
+    'beauty': ['#Beauty', '#Skincare', '#Makeup'],
+    'gaming': ['#Gaming', '#Games', '#Gamer'],
+    'car': ['#Car', '#Auto', '#Automotive'],
+    'phone': ['#Phone', '#Mobile', '#Smartphone'],
+    'laptop': ['#Laptop', '#Computer', '#Tech'],
+    'camera': ['#Camera', '#Photography', '#Photo']
+  };
+  
+  // Check for category keywords and add relevant hashtags
+  for (const [keyword, hashtags] of Object.entries(categoryMap)) {
+    if (contentText.includes(keyword)) {
+      specificHashtags.push(...hashtags);
+    }
+  }
+  
+  // Brand-specific hashtags
+  const brandMap = {
+    'hexclad': ['#HexClad'],
+    'kitchenaid': ['#KitchenAid'],
+    'ninja': ['#Ninja'],
+    'instant pot': ['#InstantPot'],
+    'apple': ['#Apple'],
+    'samsung': ['#Samsung'],
+    'sony': ['#Sony'],
+    'bose': ['#Bose'],
+    'pelican': ['#Pelican']
+  };
+  
+  for (const [brand, hashtags] of Object.entries(brandMap)) {
+    if (contentText.includes(brand)) {
+      specificHashtags.push(...hashtags);
+    }
+  }
+  
+  // Combine and deduplicate hashtags
+  const allHashtags = [...commonHashtags, ...specificHashtags];
+  const uniqueHashtags = [...new Set(allHashtags)];
+  
+  // Limit to 15 hashtags to avoid spam
+  return uniqueHashtags.slice(0, 15);
+};
+
+/**
  * Generates a safe filename from video title for description file
  * @param {string} videoTitle - Video title
  * @returns {string} - Safe filename with .txt extension
@@ -149,9 +218,13 @@ export const writeVideoDescription = async (description, videoTitle, outputDir, 
     // Clean the title for .txt file (remove markdown)
     const cleanTitle = cleanMarkdownFormatting(videoTitle);
     
-    // Prepare content with title as first line
-    const txtContent = `${cleanTitle}\n\n${cleanDescriptionText}`;
-    const mdContent = `${videoTitle}\n\n${rawDescriptionText}`;
+    // Generate hashtags based on title and description
+    const hashtags = generateHashtags(videoTitle, cleanDescriptionText);
+    const hashtagsText = hashtags.join(' ');
+    
+    // Prepare content with hashtags at the end (description already includes title)
+    const txtContent = `${cleanDescriptionText}\n\n${hashtagsText}`;
+    const mdContent = `${rawDescriptionText}\n\n${hashtagsText}`;
 
     // Write clean description to .txt file (for YouTube)
     await fs.writeFile(txtFilePath, txtContent, 'utf-8');

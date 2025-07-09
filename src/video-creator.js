@@ -76,12 +76,15 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
   }
 
   return new Promise((resolve, reject) => {
-    // Build FFmpeg command arguments with stable audio processing
+    // Build FFmpeg command arguments with stable audio processing and proper scaling
+    const [width, height] = resolution.split('x').map(Number);
+    
     const ffmpegArgs = [
       '-loop', '1',
       '-t', audioDuration.toString(),
       '-i', absoluteImagePath,
       '-i', absoluteAudioPath,
+      '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
       '-c:v', 'libx264',
       '-c:a', 'aac',
       '-b:a', '128k',           // Fixed audio bitrate for consistency
@@ -90,7 +93,6 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
       '-pix_fmt', 'yuv420p',
       '-crf', crfValue.toString(),
       '-r', fps.toString(),
-      '-s', resolution,
       '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
       '-fflags', '+genpts',     // Generate presentation timestamps
       '-shortest',
@@ -573,7 +575,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     let ffmpegArgs;
     
     if (absoluteImagePaths.length === 1) {
-      // Single image - use simple approach with proper scaling
+      // Single image - use crop approach to fill frame properly
       const [width, height] = resolution.split('x').map(Number);
       
       ffmpegArgs = [
@@ -594,7 +596,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         absoluteOutputPath
       ];
     } else {
-      // Multiple images - use filter complex with proper scaling
+      // Multiple images - use filter complex with crop approach
       ffmpegArgs = [];
       
       // Add each image as input with its duration
@@ -609,11 +611,11 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       // Add audio input
       ffmpegArgs.push('-i', absoluteAudioPath);
       
-      // Create filter complex with proper scaling
+      // Create filter complex with crop approach to fill frame
       let filterComplex = '';
       const [width, height] = resolution.split('x').map(Number);
       
-      // Scale and pad each image with proper aspect ratio handling
+      // Scale and crop each image to fill frame properly
       for (let i = 0; i < absoluteImagePaths.length; i++) {
         filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
       }

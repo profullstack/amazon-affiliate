@@ -132,7 +132,10 @@ Key requirements:
 - Include natural pauses and emphasis where appropriate
 - Aim for 60-90 seconds of speaking time (approximately 150-200 words)
 - Transform the Amazon description into natural, conversational English language
-- Avoid any non-English words, brand names in foreign languages, or international expressions`;
+- Avoid any non-English words, brand names in foreign languages, or international expressions
+- CRITICAL: Never include section headers, titles, or labels like "Introduction:", "Features:", "Conclusion:" etc.
+- Create a natural flowing presentation script that sounds like a continuous conversation
+- Transition smoothly between topics without announcing what section you're moving to`;
 
   const stylePrompts = {
     conversational: `${basePrompt}
@@ -196,15 +199,18 @@ CRITICAL LANGUAGE REQUIREMENT:
 - Do not include any non-English brand names, technical terms, or international expressions
 - Use only standard American English throughout the entire script
 
-REVIEW SCRIPT REQUIREMENTS:
-1. INTRODUCTION: Start with a natural hook that mentions the product name
-2. PRODUCT OVERVIEW: Use the actual Amazon description to explain what this product is and what it does
-3. KEY FEATURES: Highlight the most important features from the Amazon listing in your own words
-4. PRICE & VALUE: Discuss the current price and whether it represents good value
-5. CUSTOMER FEEDBACK: Reference the rating and review count to build credibility
-6. VISUAL ELEMENTS: Mention that you'll be showing the product images during the review
-7. HONEST ASSESSMENT: Give your genuine opinion based on the product information
-8. RECOMMENDATION: End with a clear recommendation and call-to-action
+SCRIPT FLOW REQUIREMENTS:
+Create a natural, flowing presentation script that seamlessly covers these elements WITHOUT section headers or titles:
+- Start with a natural hook that mentions the product name
+- Smoothly transition to explaining what this product is and what it does using the Amazon description
+- Naturally highlight the most important features from the Amazon listing in your own words
+- Organically discuss the current price and whether it represents good value
+- Naturally reference the rating and review count to build credibility
+- Mention that you'll be showing the product images during the review
+- Give your genuine opinion based on the product information
+- End with a clear recommendation and call-to-action
+
+CRITICAL: Do NOT include any section titles, headers, or labels like "Introduction:", "Overview:", "Features:", etc. The script should flow naturally like a conversation without any structural markers.
 
 TONE & STYLE GUIDELINES:
 - Sound like a real person having a conversation, not reading marketing copy
@@ -790,11 +796,14 @@ PRODUCT DETAILS:
 - Key Features: ${Array.isArray(features) ? features.slice(0, 3).join(', ') : 'Not specified'}
 - Description: ${processProductDescription(description).substring(0, 300)}
 
-SHORT VIDEO SCRIPT REQUIREMENTS:
-1. HOOK (0-3 seconds): Start with an attention-grabbing opener
-2. QUICK OVERVIEW (3-15 seconds): Briefly explain what the product is and why it matters
-3. KEY HIGHLIGHT (15-25 seconds): Focus on 1-2 most compelling features or benefits
-4. CALL TO ACTION (25-30 seconds): Quick recommendation and engagement request
+SHORT VIDEO SCRIPT FLOW:
+Create a natural, fast-paced script that flows seamlessly through these elements WITHOUT any section headers or time markers:
+- Start with an attention-grabbing opener
+- Smoothly transition to briefly explaining what the product is and why it matters
+- Naturally focus on 1-2 most compelling features or benefits
+- End with a quick recommendation and engagement request
+
+CRITICAL: Do NOT include any section titles, time markers, or labels like "Hook:", "Overview:", etc. The script should flow naturally like an excited conversation without any structural markers.
 
 STYLE GUIDELINES:
 - Write ONLY in English - no foreign words or phrases
