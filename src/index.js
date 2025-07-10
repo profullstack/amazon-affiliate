@@ -26,7 +26,9 @@ const DEFAULT_OPTIONS = {
   createShortVideo: true,
   publishBothVideos: true, // New option to control dual publishing
   enableAffiliateOverlay: false, // New option to enable affiliate text overlay on videos
-  setupInteractiveElements: false // New option to setup YouTube Cards and End Screens
+  setupInteractiveElements: false, // New option to setup YouTube Cards and End Screens
+  enableBackgroundMusic: true, // Enable background music by default
+  enableIntroOutro: true // Enable intro/outro by default
 };
 
 /**
@@ -428,7 +430,12 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         imagePaths,
         voiceoverPath,
         videoPath,
-        videoOptions
+        {
+          ...videoOptions,
+          enableBackgroundMusic: config.enableBackgroundMusic,
+          enableIntroOutro: config.enableIntroOutro,
+          introOutroOptions: config.introOutroOptions || {}
+        }
       );
     }
     
@@ -485,7 +492,12 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           imagePaths,
           shortVoiceoverPath,
           shortVideoPath,
-          shortVideoOptions
+          {
+            ...shortVideoOptions,
+            enableBackgroundMusic: config.enableBackgroundMusic,
+            enableIntroOutro: config.enableIntroOutro,
+            introOutroOptions: config.introOutroOptions || {}
+          }
         );
         
         timings.shortVideoCreation.end = Date.now();
