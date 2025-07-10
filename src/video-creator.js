@@ -323,6 +323,7 @@ const createSlideshowTransitions = (imageCount, durationPerImage, transitionDura
     const transitionStart = (i + 1) * durationPerImage - transitionDuration;
     const nextStream = i === imageCount - 2 ? '[outv]' : `[t${i}]`;
     
+    // Simple xfade without additional fps filters (they're already applied)
     filterComplex += `${currentStream}[v${i + 1}]xfade=transition=${randomEffect}:duration=${transitionDuration}:offset=${transitionStart}${nextStream};`;
     currentStream = nextStream;
     
@@ -719,14 +720,10 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
   const durationPerImage = audioDuration / imagePaths.length;
   console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
 
-  // Generate smooth transitions between slides
-  const transitionDuration = Math.min(0.8, durationPerImage * 0.2); // Max 0.8s or 20% of slide duration
-  const transitionConfig = createSlideshowTransitions(absoluteImagePaths.length, durationPerImage, transitionDuration);
-  
-  console.log(`🎬 Adding ${transitionConfig.transitions.length} smooth transitions...`);
-  transitionConfig.transitions.forEach((t, i) => {
-    console.log(`   ${i + 1}. ${t.effect} transition at ${t.startTime.toFixed(1)}s`);
-  });
+  // Use simple concatenation for now to ensure reliability
+  console.log('🔄 Using simple concatenation for maximum compatibility');
+  const transitionDuration = 0.5; // Define for compatibility, but not used
+  const transitionConfig = { filterComplex: '', transitions: [] };
 
   return new Promise((resolve, reject) => {
     // Build FFmpeg command for slideshow with smooth transitions
@@ -762,11 +759,15 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
     }
     
     // Add smooth transitions between images
-    if (absoluteImagePaths.length > 1) {
+    if (absoluteImagePaths.length > 1 && transitionConfig.filterComplex) {
       filterComplex += transitionConfig.filterComplex;
+    } else if (absoluteImagePaths.length > 1) {
+      // Fallback: simple concatenation without transitions
+      console.log('🔄 Using simple concatenation fallback (no transitions)');
+      filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0[outv];`;
     } else {
       // Single image - no transitions needed
-      filterComplex += '[v0]fps=' + fps + '[outv];';
+      filterComplex += '[v0]copy[outv];';
     }
     
     if (backgroundMusicPath) {
@@ -1045,7 +1046,10 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   const {
     resolution = '1080x1920',      // Vertical format for mobile (9:16 aspect ratio)
     fps = 30,                      // High fps for smooth playback
-    quality = 'high'               // High quality for social media
+    quality = 'high',              // High quality for social media
+    enableBackgroundMusic = true,  // Enable background music by default
+    enableIntroOutro = true,       // Enable intro/outro by default
+    introOutroOptions = {}         // Options for intro/outro configuration
   } = options;
 
   // Convert quality string to numeric CRF value
@@ -1104,20 +1108,35 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   console.log(`📹 Output: ${absoluteOutputPath}`);
   console.log(`📐 Resolution: ${resolution} (vertical format for mobile)`);
 
+  // Select background music if enabled
+  let backgroundMusicPath = null;
+  let backgroundMusicConfig = null;
+  if (enableBackgroundMusic) {
+    backgroundMusicPath = await selectRandomBackgroundMusic();
+    if (backgroundMusicPath) {
+      console.log(`🎼 Short video background music: ${path.basename(backgroundMusicPath)}`);
+    }
+  }
+
+  // Create intro/outro configuration if enabled
+  let introOutroConfig = null;
+  let totalVideoDuration = audioDuration;
+  
+  if (enableIntroOutro && backgroundMusicPath) {
+    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
+    totalVideoDuration += introOutroConfig.totalExtraDuration;
+    console.log(`🎭 Short video intro/outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
+    console.log(`⏱️ Total short video duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
+  }
+
   // Calculate duration per image for the short video
   const durationPerImage = audioDuration / imagePaths.length;
   console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
 
-  // Generate smooth transitions for short videos too
-  const transitionDuration = Math.min(0.5, durationPerImage * 0.15); // Shorter transitions for short videos
-  const transitionConfig = createSlideshowTransitions(absoluteImagePaths.length, durationPerImage, transitionDuration);
-  
-  if (transitionConfig.transitions.length > 0) {
-    console.log(`🎬 Adding ${transitionConfig.transitions.length} quick transitions for short video...`);
-    transitionConfig.transitions.forEach((t, i) => {
-      console.log(`   ${i + 1}. ${t.effect} transition at ${t.startTime.toFixed(1)}s`);
-    });
-  }
+  // Use simple concatenation for short videos too for maximum compatibility
+  console.log('📱 Using simple concatenation for short video compatibility');
+  const transitionDuration = 0.5; // Define for compatibility, but not used
+  const transitionConfig = { filterComplex: '', transitions: [] };
 
   return new Promise((resolve, reject) => {
     // For short videos, use a simpler approach that's more reliable
@@ -1125,15 +1144,60 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     
     let ffmpegArgs;
     
-    if (absoluteImagePaths.length === 1) {
-      // Single image - use crop approach to fill frame properly
-      const [width, height] = resolution.split('x').map(Number);
+    if (introOutroConfig && (introOutroConfig.intro.enabled || introOutroConfig.outro.enabled)) {
+      // Use intro/outro with complex filter for short video
+      ffmpegArgs = [];
+      let inputIndex = 0;
       
-      ffmpegArgs = [
-        '-loop', '1',
-        '-i', absoluteImagePaths[0],
-        '-i', absoluteAudioPath,
-        '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      // Add intro image if enabled
+      if (introOutroConfig.intro.enabled) {
+        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
+        inputIndex++;
+      }
+      
+      // Add main images
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
+        ffmpegArgs.push('-loop', '1', '-t', durationPerImage.toString(), '-i', absoluteImagePaths[i]);
+        inputIndex++;
+      }
+      
+      // Add outro image if enabled
+      if (introOutroConfig.outro.enabled) {
+        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+        inputIndex++;
+      }
+      
+      // Add audio inputs
+      ffmpegArgs.push('-i', absoluteAudioPath);
+      const voiceoverIndex = inputIndex;
+      inputIndex++;
+      
+      if (backgroundMusicPath) {
+        ffmpegArgs.push('-i', backgroundMusicPath);
+        inputIndex++;
+      }
+      
+      // Create complex filter for intro/outro short video
+      const mainContentConfig = {
+        imageCount: absoluteImagePaths.length,
+        duration: audioDuration,
+        backgroundVolume: 0.15,
+        transitionConfig: { filterComplex: '' }
+      };
+      
+      const filterComplex = createIntroOutroFilter({
+        introConfig: introOutroConfig.intro,
+        mainContentConfig: mainContentConfig,
+        outroConfig: introOutroConfig.outro,
+        backgroundMusicPath: backgroundMusicPath,
+        totalDuration: totalVideoDuration,
+        resolution: resolution
+      });
+      
+      ffmpegArgs.push(
+        '-filter_complex', filterComplex,
+        '-map', '[final_v]',
+        '-map', '[audio_out]',
         '-c:v', 'libx264',
         '-c:a', 'aac',
         '-b:a', '128k',
@@ -1142,10 +1206,68 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-pix_fmt', 'yuv420p',
         '-crf', crfValue.toString(),
         '-r', fps.toString(),
+        '-avoid_negative_ts', 'make_zero',
+        '-fflags', '+genpts',
         '-shortest',
         '-y',
         absoluteOutputPath
-      ];
+      );
+      
+      console.log(`🎼 Short video mixing audio with intro/outro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%, outro: ${(introOutroConfig.outro.volume * 100).toFixed(0)}%)`);
+      
+    } else if (absoluteImagePaths.length === 1) {
+      // Single image - use crop approach to fill frame properly
+      const [width, height] = resolution.split('x').map(Number);
+      
+      if (backgroundMusicPath) {
+        // Single image with background music
+        backgroundMusicConfig = createBackgroundMusicFilter(backgroundMusicPath, audioDuration);
+        console.log(`🎼 Short video mixing audio: Voice (100%) + Background (${(backgroundMusicConfig.settings.backgroundVolume * 100).toFixed(0)}%)`);
+        
+        ffmpegArgs = [
+          '-loop', '1',
+          '-t', audioDuration.toString(),
+          '-i', absoluteImagePaths[0],
+          '-i', absoluteAudioPath,
+          '-i', backgroundMusicPath,
+          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+          '-filter_complex', backgroundMusicConfig.audioFilter,
+          '-map', '0:v',
+          '-map', '[audio_out]',
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-r', fps.toString(),
+          '-avoid_negative_ts', 'make_zero',
+          '-fflags', '+genpts',
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        ];
+      } else {
+        // Single image without background music
+        ffmpegArgs = [
+          '-loop', '1',
+          '-i', absoluteImagePaths[0],
+          '-i', absoluteAudioPath,
+          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-r', fps.toString(),
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        ];
+      }
     } else {
       // Multiple images - use filter complex with crop approach
       ffmpegArgs = [];
@@ -1162,6 +1284,13 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       // Add audio input
       ffmpegArgs.push('-i', absoluteAudioPath);
       
+      // Add background music input if available
+      if (backgroundMusicPath) {
+        ffmpegArgs.push('-i', backgroundMusicPath);
+        backgroundMusicConfig = createBackgroundMusicFilter(backgroundMusicPath, audioDuration);
+        console.log(`🎼 Short video slideshow mixing audio: Voice (100%) + Background (${(backgroundMusicConfig.settings.backgroundVolume * 100).toFixed(0)}%)`);
+      }
+      
       // Create filter complex with transitions for short video
       let filterComplex = '';
       const [width, height] = resolution.split('x').map(Number);
@@ -1171,29 +1300,62 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
       }
       
-      // Add smooth transitions between images for short video
+      // Add simple concatenation for short video
       if (absoluteImagePaths.length > 1) {
-        filterComplex += transitionConfig.filterComplex;
+        // Simple concatenation without transitions
+        filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0[outv];`;
       } else {
         // Single image - no transitions needed
-        filterComplex += '[v0][outv];';
+        filterComplex += '[v0]copy[outv];';
       }
       
-      ffmpegArgs.push(
-        '-filter_complex', filterComplex,
-        '-map', '[outv]',
-        '-map', `${absoluteImagePaths.length}:a:0`,
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-shortest',
-        '-y',
-        absoluteOutputPath
-      );
+      if (backgroundMusicPath) {
+        // Add background music filter to the complex filter
+        const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
+        const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
+        
+        // Update the filter complex to include background music mixing
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
+        filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
+        filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+        
+        ffmpegArgs.push(
+          '-filter_complex', filterComplex,
+          '-map', '[outv]',
+          '-map', '[audio_out]',
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-avoid_negative_ts', 'make_zero',
+          '-fflags', '+genpts',
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        );
+      } else {
+        // Original audio mapping without background music
+        ffmpegArgs.push(
+          '-filter_complex', filterComplex,
+          '-map', '[outv]',
+          '-map', `${absoluteImagePaths.length}:a:0`,
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-avoid_negative_ts', 'make_zero',
+          '-fflags', '+genpts',
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        );
+      }
     }
 
     console.log('🎥 FFmpeg short video command: ffmpeg', ffmpegArgs.join(' '));
