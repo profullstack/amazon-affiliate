@@ -23,6 +23,7 @@ output/
 videos/
 dist/
 build/
+test-temp
 
 # Log files
 logs/
@@ -107,19 +108,10 @@ Thumbs.db
 *.ffmpeg-*
 
 # Video files (can be large)
-*.mp4
-*.avi
-*.mov
-*.wmv
-*.flv
-*.webm
-*.mkv
+
 
 # Audio files
-*.mp3
-*.wav
-*.aac
-*.ogg
+
 
 # Image files in temp directories
 temp/**/*.jpg
@@ -138,3 +130,4 @@ test-output/
 # Test artifacts
 test-results/
 screenshots/
+test-simple-short-crop.mp4
