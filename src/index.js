@@ -9,6 +9,7 @@ import { uploadToYouTube, uploadBothVideosToYouTube } from './youtube-publisher.
 import { addCompleteInteractiveElements } from './youtube-interactive-elements.js';
 import { PromotionManager } from './promotion-manager.js';
 import { writeVideoDescription } from './description-writer.js';
+import { videoCompletionBeep, youtubeReadyBeep } from './utils/system-notifications.js';
 import fs from 'fs/promises';
 
 /**
@@ -18,7 +19,7 @@ const DEFAULT_OPTIONS = {
   maxImages: 5,
   tempDir: './temp',
   outputDir: './output',
-  videoQuality: 'medium',
+  videoQuality: 'high',
   cleanup: true,
   onProgress: null,
   autoPromote: false,
@@ -513,6 +514,10 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         timings.shortVideoCreation = { start: timings.shortVideoCreation.start, end: Date.now() };
       }
     }
+
+    // Play notification beep for ALL video generation completion
+    // This happens after both main video and short video (if enabled) are created
+    await videoCompletionBeep();
 
     // Step 7: Create thumbnail
     reportProgress(config.onProgress, 'thumbnailCreation', 82, 'Creating YouTube thumbnail');
@@ -1108,9 +1113,16 @@ Examples:
         console.log('\n✅ Success! Video created successfully');
         console.log('⏸️ YouTube upload was skipped by user choice');
         console.log(`📁 Video saved locally: ${result.files.video}`);
+        
+        // Play notification beep for YouTube ready
+        youtubeReadyBeep();
       } else {
         console.log('\n✅ Success! Video created successfully');
         console.log(`📁 Video saved locally: ${result.files.video}`);
+        console.log('📤 Ready for YouTube upload!');
+        
+        // Play notification beep for YouTube ready
+        youtubeReadyBeep();
       }
       console.log(`⏱️  Total time: ${Math.round(result.timing.totalDuration / 1000)}s`);
     } else {

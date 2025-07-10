@@ -2,7 +2,7 @@
  * Publish command - Uploads videos to YouTube
  */
 
-import { uploadToYouTube, getUploadQuota, updateVideoMetadata } from '../youtube-publisher.js';
+import { uploadToYouTube, uploadToYouTubeShorts, getUploadQuota, updateVideoMetadata } from '../youtube-publisher.js';
 import {
   parseCommandArgs,
   validateRequiredArgs,
@@ -689,8 +689,8 @@ const runUpload = async (videoPath, options) => {
   try {
     console.log('📤 Starting YouTube upload...\n');
 
-    // Auto-detect YouTube Shorts based on filename
-    if (!options.shorts && videoPath.includes('-short.mp4')) {
+    // Auto-detect YouTube Shorts based on filename (any file containing '-short')
+    if (!options.shorts && videoPath.includes('-short')) {
       options.shorts = true;
       console.log('📱 Auto-detected short video format - enabling YouTube Shorts optimization');
       console.log('');
@@ -781,16 +781,29 @@ const runUpload = async (videoPath, options) => {
       }
     }
 
-    // Upload video
-    console.log('🚀 Uploading to YouTube...\n');
-    
-    const result = await uploadToYouTube(
-      videoPath,
-      completeOptions.title,
-      description,
-      completeOptions['product-url'],
-      uploadOptions
-    );
+    // Upload video - use appropriate function based on whether it's a Short
+    let result;
+    if (completeOptions.shorts) {
+      console.log('🚀 Uploading to YouTube Shorts...\n');
+      
+      result = await uploadToYouTubeShorts(
+        videoPath,
+        completeOptions.title,
+        description,
+        completeOptions['product-url'],
+        uploadOptions
+      );
+    } else {
+      console.log('🚀 Uploading to YouTube...\n');
+      
+      result = await uploadToYouTube(
+        videoPath,
+        completeOptions.title,
+        description,
+        completeOptions['product-url'],
+        uploadOptions
+      );
+    }
 
     // Clear progress line
     process.stdout.write('\r' + ' '.repeat(50) + '\r');

@@ -14,6 +14,7 @@ import {
   formatDuration,
   formatFileSize
 } from './utils.js';
+import { youtubeReadyBeep } from '../utils/system-notifications.js';
 
 /**
  * Flag definitions for the create command
@@ -209,9 +210,16 @@ const displayResult = (result) => {
       displaySuccess('Video created successfully!');
       displayWarning('YouTube upload was skipped by user choice');
       console.log(`📁 Video saved locally: ${result.files.video}`);
+      
+      // Play notification beep for YouTube ready
+      youtubeReadyBeep();
     } else {
       displaySuccess('Video created successfully!');
       console.log(`📁 Video saved locally: ${result.files.video}`);
+      console.log('📤 Ready for YouTube upload!');
+      
+      // Play notification beep for YouTube ready
+      youtubeReadyBeep();
     }
 
     // Display file information

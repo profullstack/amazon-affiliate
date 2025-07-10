@@ -295,7 +295,8 @@ export const generateVoiceover = async (
   text,
   outputPath = 'temp/voiceover.mp3',
   voiceSettings = CONVERSATIONAL_VOICE_SETTINGS,
-  gender = null
+  gender = null,
+  specificVoiceId = null
 ) => {
   // Validate input
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -307,9 +308,13 @@ export const generateVoiceover = async (
     throw new Error('Gender must be "male", "female", or null');
   }
 
-  // Validate environment and get voice based on gender preference
+  // Validate environment and get voice based on gender preference or specific voice ID
   const { ELEVENLABS_API_KEY } = validateEnvironment();
-  const ELEVENLABS_VOICE_ID = getRandomVoice(gender);
+  const ELEVENLABS_VOICE_ID = specificVoiceId || getRandomVoice(gender);
+  
+  if (specificVoiceId) {
+    console.log(`🎤 Using specified voice ID: ${specificVoiceId}`);
+  }
 
   // Enhance text for natural speech, then preprocess
   const enhancedText = enhanceTextForSpeech(text);

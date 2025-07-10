@@ -67,31 +67,24 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
 };
 
 /**
- * Creates intro and outro segments for professional video branding
+ * Creates intro segment for professional video branding (outro removed per user request)
  * @param {string} backgroundMusicPath - Path to background music file
- * @param {Object} options - Intro/outro options
- * @returns {Object} Intro/outro configuration
+ * @param {Object} options - Intro options
+ * @returns {Object} Intro configuration
  */
 const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
   const {
     introDuration = 5.0,        // 5 second intro
-    outroDuration = 5.0,        // 5 second outro
-    introVolume = 0.4,          // 40% volume for intro (higher than background)
-    outroVolume = 0.4,          // 40% volume for outro (higher than background)
+    introVolume = 1.0,          // 100% volume for intro music (per user request)
     introImagePath = './src/media/banner.jpg',
-    outroImagePath = './src/media/profile.jpg'
+    introVoiceoverText = 'Welcome to The Professional Prompt where we review your favorite products'
   } = options;
 
-  // Check if intro/outro images exist
+  // Check if intro image exists
   const introExists = await checkFileExists(introImagePath);
-  const outroExists = await checkFileExists(outroImagePath);
 
   if (!introExists) {
     console.log(`⚠️ Intro image not found: ${introImagePath}`);
-  }
-  
-  if (!outroExists) {
-    console.log(`⚠️ Outro image not found: ${outroImagePath}`);
   }
 
   return {
@@ -99,15 +92,16 @@ const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
       enabled: introExists,
       imagePath: introImagePath,
       duration: introDuration,
-      volume: introVolume
+      volume: introVolume,
+      voiceoverText: introVoiceoverText
     },
     outro: {
-      enabled: outroExists,
-      imagePath: outroImagePath,
-      duration: outroDuration,
-      volume: outroVolume
+      enabled: false,  // Outro completely removed per user request
+      imagePath: null,
+      duration: 0,
+      volume: 0
     },
-    totalExtraDuration: (introExists ? introDuration : 0) + (outroExists ? outroDuration : 0)
+    totalExtraDuration: introExists ? introDuration : 0  // Only intro duration now
   };
 };
 
@@ -126,18 +120,19 @@ const checkFileExists = async (filePath) => {
 };
 
 /**
- * Creates complex FFmpeg filter for intro, main content, and outro with varying music volumes
+ * Creates complex FFmpeg filter for intro and main content (outro removed per user request)
  * @param {Object} config - Configuration object
  * @returns {string} FFmpeg filter complex string
  */
-const createIntroOutroFilter = (config) => {
+export const createIntroOutroFilter = (config) => {
   const {
     introConfig,
     mainContentConfig,
-    outroConfig,
     backgroundMusicPath,
     totalDuration,
-    resolution
+    resolution,
+    introVoiceoverIndex = null,  // New parameter for intro voiceover audio
+    mainVoiceoverIndex = null    // New parameter for main voiceover audio
   } = config;
 
   const [width, height] = resolution.split('x').map(Number);
@@ -145,9 +140,21 @@ const createIntroOutroFilter = (config) => {
   let inputIndex = 0;
   let segmentFilters = [];
 
-  // Intro segment - zoom to fit (crop to fill frame)
+  // Intro segment - scale appropriately for aspect ratio
   if (introConfig.enabled) {
-    filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setpts=PTS-STARTPTS[intro_v];`;
+    // For vertical videos (like short videos), use decrease to fit content within frame
+    // For horizontal videos, use increase to fill frame
+    const isVertical = height > width;
+    const scaleMode = isVertical ? 'decrease' : 'increase';
+    const paddingColor = isVertical ? 'black' : 'black';
+    
+    if (isVertical) {
+      // Vertical format: fit banner within frame with padding
+      filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${paddingColor},setsar=1:1,setpts=PTS-STARTPTS[intro_v];`;
+    } else {
+      // Horizontal format: crop to fill frame
+      filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1:1,setpts=PTS-STARTPTS[intro_v];`;
+    }
     segmentFilters.push('[intro_v]');
     inputIndex++;
   }
@@ -155,7 +162,7 @@ const createIntroOutroFilter = (config) => {
   // Main content segments (images with transitions)
   const mainContentStart = inputIndex;
   for (let i = 0; i < mainContentConfig.imageCount; i++) {
-    filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,setpts=PTS-STARTPTS[v${i}];`;
+    filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,fps=30,setpts=PTS-STARTPTS[v${i}];`;
     inputIndex++;
   }
 
@@ -163,56 +170,101 @@ const createIntroOutroFilter = (config) => {
   if (mainContentConfig.imageCount > 1 && mainContentConfig.transitionConfig.filterComplex) {
     filterComplex += mainContentConfig.transitionConfig.filterComplex;
     segmentFilters.push('[outv]');
-  } else {
+  } else if (mainContentConfig.imageCount === 1) {
+    // Single main content image - use the processed video stream
     segmentFilters.push('[v0]');
+  } else {
+    // Fallback: concatenate all main content images
+    const mainContentStreams = [];
+    for (let i = 0; i < mainContentConfig.imageCount; i++) {
+      mainContentStreams.push(`[v${i}]`);
+    }
+    filterComplex += `${mainContentStreams.join('')}concat=n=${mainContentConfig.imageCount}:v=1:a=0[main_v];`;
+    segmentFilters.push('[main_v]');
   }
 
-  // Outro segment - centered with aspect ratio preserved (letterboxed/pillarboxed)
-  if (outroConfig.enabled) {
-    filterComplex += `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setpts=PTS-STARTPTS[outro_v];`;
-    segmentFilters.push('[outro_v]');
-    inputIndex++;
-  }
-
-  // Concatenate all video segments
+  // Concatenate video segments (intro + main content only, no outro)
   if (segmentFilters.length > 1) {
     filterComplex += `${segmentFilters.join('')}concat=n=${segmentFilters.length}:v=1:a=0[final_v];`;
-  } else {
+  } else if (segmentFilters.length === 1) {
+    // Single segment - just copy it to final output
     filterComplex += `${segmentFilters[0]}copy[final_v];`;
+  } else {
+    // Fallback - should not happen, but handle gracefully
+    throw new Error('No video segments available for concatenation');
   }
 
-  // Audio processing with varying volumes for intro/main/outro
-  const voiceoverIndex = inputIndex; // Voiceover audio
-  const musicIndex = inputIndex + 1; // Background music
+  // Audio processing: intro voiceover + main voiceover + background music
+  // mainVoiceoverIndex is now passed as a parameter
+  const musicIndex = mainVoiceoverIndex + 1; // Background music (after main voiceover)
   
   if (backgroundMusicPath) {
-    // Create volume-varying background music
+    // Create volume-varying background music with dynamic intro volume control
     const introEnd = introConfig.enabled ? introConfig.duration : 0;
     const mainEnd = introEnd + mainContentConfig.duration;
-    const outroStart = mainEnd;
-    const outroEnd = totalDuration;
 
     let musicFilter = `[${musicIndex}:a]aloop=loop=-1:size=2e+09`;
     
-    // Apply different volumes for different segments
-    if (introConfig.enabled) {
+    // Apply different volumes for intro vs main content
+    if (introConfig.enabled && introVoiceoverIndex !== null) {
+      // Get intro voiceover duration to determine when narration ends
+      // For now, assume narration takes 70% of intro duration, then music volume increases
+      const narrationEnd = introEnd * 0.7;
+      
+      // Low volume (20%) during intro narration to not drown out voice
+      musicFilter += `,volume=enable='between(t,0,${narrationEnd})':volume=0.2`;
+      // Higher volume (60%) after narration ends for remainder of intro
+      musicFilter += `,volume=enable='between(t,${narrationEnd},${introEnd})':volume=0.6`;
+    } else if (introConfig.enabled) {
+      // No intro voiceover - use normal intro volume
       musicFilter += `,volume=enable='between(t,0,${introEnd})':volume=${introConfig.volume}`;
     }
     
+    // Lower volume during main content (15% as before)
     musicFilter += `,volume=enable='between(t,${introEnd},${mainEnd})':volume=${mainContentConfig.backgroundVolume}`;
-    
-    if (outroConfig.enabled) {
-      musicFilter += `,volume=enable='between(t,${outroStart},${outroEnd})':volume=${outroConfig.volume}`;
-    }
     
     // Add fade in/out
     musicFilter += `,afade=t=in:st=0:d=2,afade=t=out:st=${totalDuration - 2}:d=2[bg];`;
     
     filterComplex += musicFilter;
-    filterComplex += `[${voiceoverIndex}:a]volume=1.0[voice];`;
-    filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+
+    if (introVoiceoverIndex !== null && introConfig.enabled) {
+      // FIXED: Use correct audio inputs - intro voiceover and main voiceover are separate files
+      // Intro voiceover: trim to intro duration and play from start
+      filterComplex += `[${introVoiceoverIndex}:a]volume=1.0,atrim=0:${introEnd}[intro_voice];`;
+      // Main voiceover: delay by intro duration so it starts after intro ends
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
+      // Combine intro and delayed main voiceover (they won't overlap due to delay)
+      filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[combined_voice];`;
+      // Mix combined voice with background music
+      filterComplex += `[combined_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+    } else if (introConfig.enabled) {
+      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_voice];`;
+      filterComplex += `[delayed_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+    } else {
+      // No intro - main voiceover starts immediately
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0[voice];`;
+      filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+    }
   } else {
-    filterComplex += `[${voiceoverIndex}:a]volume=1.0[audio_out];`;
+    // No background music
+    if (introVoiceoverIndex !== null && introConfig.enabled) {
+      // FIXED: Use correct audio inputs without background music
+      // Intro voiceover: trim to intro duration and play from start
+      filterComplex += `[${introVoiceoverIndex}:a]volume=1.0,atrim=0:${introEnd}[intro_voice];`;
+      // Main voiceover: delay by intro duration so it starts after intro ends
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
+      // Combine intro and delayed main voiceover (they won't overlap due to delay)
+      filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[audio_out];`;
+    } else if (introConfig.enabled) {
+      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro
+      const introEnd = introConfig.enabled ? introConfig.duration : 0;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[audio_out];`;
+    } else {
+      // No intro - main voiceover starts immediately
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0[audio_out];`;
+    }
   }
 
   return filterComplex;
@@ -426,15 +478,47 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
     audioDuration = 30;
   }
 
-  // Create intro/outro configuration if enabled
+  // Create intro configuration if enabled (outro removed per user request)
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
+  let introVoiceoverPath = null;
   
-  if (enableIntroOutro && backgroundMusicPath) {
+  if (enableIntroOutro) {
     introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
-    console.log(`🎭 Intro/outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
-    console.log(`⏱️ Total video duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
+    console.log(`🎭 Intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
+    console.log(`⏱️ Total video duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
+    
+    // Generate intro voiceover if intro is enabled
+    if (introOutroConfig.intro.enabled && introOutroConfig.intro.voiceoverText) {
+      console.log('🎤 Generating intro voiceover...');
+      const { generateVoiceover, getRandomVoice } = await import('./voiceover-generator.js');
+      introVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/intro-voiceover.mp3`);
+      
+      try {
+        // FIXED: Select a specific voice and store it for consistency between intro and main voiceover
+        // Use the same voice that will be used for the main voiceover (if already selected) or select one now
+        let selectedVoice = options.selectedVoiceId;
+        if (!selectedVoice) {
+          selectedVoice = getRandomVoice(options.voiceGender);
+          options.selectedVoiceId = selectedVoice; // Store for main voiceover to use
+        }
+        console.log(`🎤 Using consistent voice for intro and main: ${selectedVoice}`);
+        
+        // Use the same voice settings as the main voiceover for consistency
+        await generateVoiceover(
+          introOutroConfig.intro.voiceoverText,
+          introVoiceoverPath,
+          undefined, // Use default voice settings
+          options.voiceGender, // Pass voice gender for consistency
+          selectedVoice // Pass the specific voice ID to ensure consistency
+        );
+        console.log(`✅ Intro voiceover generated: ${introVoiceoverPath}`);
+      } catch (error) {
+        console.warn(`⚠️ Failed to generate intro voiceover: ${error.message}`);
+        introVoiceoverPath = null;
+      }
+    }
   }
 
   return new Promise((resolve, reject) => {
@@ -443,38 +527,39 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
     
     let ffmpegArgs;
     
-    if (introOutroConfig && (introOutroConfig.intro.enabled || introOutroConfig.outro.enabled)) {
-      // Use intro/outro with complex filter
+    if (introOutroConfig && introOutroConfig.intro.enabled) {
+      // Use intro with complex filter (outro removed per user request)
       ffmpegArgs = [];
       let inputIndex = 0;
       
-      // Add intro image if enabled
-      if (introOutroConfig.intro.enabled) {
-        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
-        inputIndex++;
-      }
+      // Add intro image
+      ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
+      inputIndex++;
       
       // Add main image
       ffmpegArgs.push('-loop', '1', '-t', audioDuration.toString(), '-i', absoluteImagePath);
       inputIndex++;
       
-      // Add outro image if enabled
-      if (introOutroConfig.outro.enabled) {
-        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+      // Add intro voiceover if available
+      let introVoiceoverIndex = null;
+      if (introVoiceoverPath) {
+        ffmpegArgs.push('-i', introVoiceoverPath);
+        introVoiceoverIndex = inputIndex;
         inputIndex++;
       }
       
-      // Add audio inputs
+      // Add main audio
       ffmpegArgs.push('-i', absoluteAudioPath);
-      const voiceoverIndex = inputIndex;
+      const mainVoiceoverIndex = inputIndex;
       inputIndex++;
       
+      // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
         inputIndex++;
       }
       
-      // Create complex filter for intro/outro
+      // Create complex filter for intro + main content
       const mainContentConfig = {
         imageCount: 1,
         duration: audioDuration,
@@ -485,10 +570,11 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
       const filterComplex = createIntroOutroFilter({
         introConfig: introOutroConfig.intro,
         mainContentConfig: mainContentConfig,
-        outroConfig: introOutroConfig.outro,
         backgroundMusicPath: backgroundMusicPath,
         totalDuration: totalVideoDuration,
-        resolution: resolution
+        resolution: resolution,
+        introVoiceoverIndex: introVoiceoverIndex,
+        mainVoiceoverIndex: mainVoiceoverIndex
       });
       
       ffmpegArgs.push(
@@ -505,12 +591,12 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-r', fps.toString(),
         '-avoid_negative_ts', 'make_zero',
         '-fflags', '+genpts',
-        '-shortest',
+        // Don't use -shortest with intro to allow full extended duration
         '-y',
         absoluteOutputPath
       );
       
-      console.log(`🎼 Mixing audio with intro/outro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%, outro: ${(introOutroConfig.outro.volume * 100).toFixed(0)}%)`);
+      console.log(`🎼 Mixing audio with intro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%)`);
       
     } else if (backgroundMusicPath) {
       // Create background music configuration
@@ -705,15 +791,47 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
     audioDuration = 30;
   }
 
-  // Create intro/outro configuration if enabled
+  // Create intro configuration if enabled (outro removed per user request)
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
+  let introVoiceoverPath = null;
   
-  if (enableIntroOutro && backgroundMusicPath) {
+  if (enableIntroOutro) {
     introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
-    console.log(`🎭 Slideshow intro/outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
-    console.log(`⏱️ Total slideshow duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
+    console.log(`🎭 Slideshow intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
+    console.log(`⏱️ Total slideshow duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
+    
+    // Generate intro voiceover if intro is enabled
+    if (introOutroConfig.intro.enabled && introOutroConfig.intro.voiceoverText) {
+      console.log('🎤 Generating slideshow intro voiceover...');
+      const { generateVoiceover, getRandomVoice } = await import('./voiceover-generator.js');
+      introVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/slideshow-intro-voiceover.mp3`);
+      
+      try {
+        // FIXED: Select a specific voice and store it for consistency between intro and main voiceover
+        // Use the same voice that will be used for the main voiceover (if already selected) or select one now
+        let selectedVoice = options.selectedVoiceId;
+        if (!selectedVoice) {
+          selectedVoice = getRandomVoice(options.voiceGender);
+          options.selectedVoiceId = selectedVoice; // Store for main voiceover to use
+        }
+        console.log(`🎤 Using consistent voice for slideshow intro and main: ${selectedVoice}`);
+        
+        // Use the same voice settings as the main voiceover for consistency
+        await generateVoiceover(
+          introOutroConfig.intro.voiceoverText,
+          introVoiceoverPath,
+          undefined, // Use default voice settings
+          options.voiceGender, // Pass voice gender for consistency
+          selectedVoice // Pass the specific voice ID to ensure consistency
+        );
+        console.log(`✅ Slideshow intro voiceover generated: ${introVoiceoverPath}`);
+      } catch (error) {
+        console.warn(`⚠️ Failed to generate slideshow intro voiceover: ${error.message}`);
+        introVoiceoverPath = null;
+      }
+    }
   }
 
   // Calculate duration per image
@@ -726,63 +844,63 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
   const transitionConfig = { filterComplex: '', transitions: [] };
 
   return new Promise((resolve, reject) => {
-    // Build FFmpeg command for slideshow with smooth transitions
-    const ffmpegArgs = [];
+    let ffmpegArgs;
     
-    // Add each image as input with extended duration for transitions
-    const extendedDuration = durationPerImage + (transitionDuration / 2);
-    for (let i = 0; i < absoluteImagePaths.length; i++) {
-      ffmpegArgs.push(
-        '-loop', '1',
-        '-t', extendedDuration.toString(),
-        '-i', absoluteImagePaths[i]
-      );
-    }
-    
-    // Add audio input
-    ffmpegArgs.push('-i', absoluteAudioPath);
-    
-    // Add background music input if available
-    if (backgroundMusicPath) {
-      ffmpegArgs.push('-i', backgroundMusicPath);
-      backgroundMusicConfig = createBackgroundMusicFilter(backgroundMusicPath, audioDuration);
-      console.log(`🎼 Mixing slideshow audio: Voice (100%) + Background (${(backgroundMusicConfig.settings.backgroundVolume * 100).toFixed(0)}%)`);
-    }
-    
-    // Create filter complex with smooth transitions
-    let filterComplex = '';
-    const [width, height] = resolution.split('x').map(Number);
-    
-    // Scale and pad each image, ensuring consistent timing and SAR
-    for (let i = 0; i < absoluteImagePaths.length; i++) {
-      filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
-    }
-    
-    // Add smooth transitions between images
-    if (absoluteImagePaths.length > 1 && transitionConfig.filterComplex) {
-      filterComplex += transitionConfig.filterComplex;
-    } else if (absoluteImagePaths.length > 1) {
-      // Fallback: simple concatenation without transitions
-      console.log('🔄 Using simple concatenation fallback (no transitions)');
-      filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0[outv];`;
-    } else {
-      // Single image - no transitions needed
-      filterComplex += '[v0]copy[outv];';
-    }
-    
-    if (backgroundMusicPath) {
-      // Add background music filter to the complex filter
-      const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
-      const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
+    if (introOutroConfig && introOutroConfig.intro.enabled) {
+      // Use intro with complex filter for slideshow (outro removed per user request)
+      ffmpegArgs = [];
+      let inputIndex = 0;
       
-      // Update the filter complex to include background music mixing
-      filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
-      filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
-      filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+      // Add intro image
+      ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
+      inputIndex++;
+      
+      // Add main images
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
+        ffmpegArgs.push('-loop', '1', '-t', durationPerImage.toString(), '-i', absoluteImagePaths[i]);
+        inputIndex++;
+      }
+      
+      // Add intro voiceover if available
+      let introVoiceoverIndex = null;
+      if (introVoiceoverPath) {
+        ffmpegArgs.push('-i', introVoiceoverPath);
+        introVoiceoverIndex = inputIndex;
+        inputIndex++;
+      }
+      
+      // Add main audio
+      ffmpegArgs.push('-i', absoluteAudioPath);
+      const mainVoiceoverIndex = inputIndex;
+      inputIndex++;
+      
+      // Add background music
+      if (backgroundMusicPath) {
+        ffmpegArgs.push('-i', backgroundMusicPath);
+        inputIndex++;
+      }
+      
+      // Create complex filter for intro + slideshow
+      const mainContentConfig = {
+        imageCount: absoluteImagePaths.length,
+        duration: audioDuration,
+        backgroundVolume: 0.15,
+        transitionConfig: { filterComplex: '' }
+      };
+      
+      const filterComplex = createIntroOutroFilter({
+        introConfig: introOutroConfig.intro,
+        mainContentConfig: mainContentConfig,
+        backgroundMusicPath: backgroundMusicPath,
+        totalDuration: totalVideoDuration,
+        resolution: resolution,
+        introVoiceoverIndex: introVoiceoverIndex,
+        mainVoiceoverIndex: mainVoiceoverIndex
+      });
       
       ffmpegArgs.push(
         '-filter_complex', filterComplex,
-        '-map', '[outv]',
+        '-map', '[final_v]',
         '-map', '[audio_out]',
         '-c:v', 'libx264',
         '-c:a', 'aac',
@@ -794,30 +912,107 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         '-r', fps.toString(),
         '-avoid_negative_ts', 'make_zero',
         '-fflags', '+genpts',
-        '-shortest',
+        // Don't use -shortest with intro to allow full extended duration
         '-y',
         absoluteOutputPath
       );
+      
+      console.log(`🎼 Slideshow mixing audio with intro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%)`);
+      
     } else {
-      // Original audio mapping without background music
-      ffmpegArgs.push(
-        '-filter_complex', filterComplex,
-        '-map', '[outv]',
-        '-map', `${absoluteImagePaths.length}:a:0`,
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-b:a', '128k',           // Fixed audio bitrate for consistency
-        '-ar', '44100',           // Fixed sample rate
-        '-ac', '2',               // Stereo audio
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
-        '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
-        '-fflags', '+genpts',     // Generate presentation timestamps
-        '-shortest',
-        '-y',
-        absoluteOutputPath
-      );
+      // Build FFmpeg command for slideshow with smooth transitions
+      ffmpegArgs = [];
+      
+      // Add each image as input with extended duration for transitions
+      const extendedDuration = durationPerImage + (transitionDuration / 2);
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
+        ffmpegArgs.push(
+          '-loop', '1',
+          '-t', extendedDuration.toString(),
+          '-i', absoluteImagePaths[i]
+        );
+      }
+      
+      // Add audio input
+      ffmpegArgs.push('-i', absoluteAudioPath);
+      
+      // Add background music input if available
+      if (backgroundMusicPath) {
+        ffmpegArgs.push('-i', backgroundMusicPath);
+        backgroundMusicConfig = createBackgroundMusicFilter(backgroundMusicPath, audioDuration);
+        console.log(`🎼 Mixing slideshow audio: Voice (100%) + Background (${(backgroundMusicConfig.settings.backgroundVolume * 100).toFixed(0)}%)`);
+      }
+      
+      // Create filter complex with smooth transitions
+      let filterComplex = '';
+      const [width, height] = resolution.split('x').map(Number);
+      
+      // Scale and pad each image, ensuring consistent timing and SAR
+      for (let i = 0; i < absoluteImagePaths.length; i++) {
+        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
+      }
+      
+      // Add smooth transitions between images
+      if (absoluteImagePaths.length > 1 && transitionConfig.filterComplex) {
+        filterComplex += transitionConfig.filterComplex;
+      } else if (absoluteImagePaths.length > 1) {
+        // Fallback: simple concatenation without transitions
+        console.log('🔄 Using simple concatenation fallback (no transitions)');
+        filterComplex += absoluteImagePaths.map((_, i) => `[v${i}]`).join('') + `concat=n=${absoluteImagePaths.length}:v=1:a=0[outv];`;
+      } else {
+        // Single image - no transitions needed
+        filterComplex += '[v0]copy[outv];';
+      }
+      
+      if (backgroundMusicPath) {
+        // Add background music filter to the complex filter
+        const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
+        const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
+        
+        // Update the filter complex to include background music mixing
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
+        filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
+        filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+        
+        ffmpegArgs.push(
+          '-filter_complex', filterComplex,
+          '-map', '[outv]',
+          '-map', '[audio_out]',
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-r', fps.toString(),
+          '-avoid_negative_ts', 'make_zero',
+          '-fflags', '+genpts',
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        );
+      } else {
+        // Original audio mapping without background music
+        ffmpegArgs.push(
+          '-filter_complex', filterComplex,
+          '-map', '[outv]',
+          '-map', `${absoluteImagePaths.length}:a:0`,
+          '-c:v', 'libx264',
+          '-c:a', 'aac',
+          '-b:a', '128k',           // Fixed audio bitrate for consistency
+          '-ar', '44100',           // Fixed sample rate
+          '-ac', '2',               // Stereo audio
+          '-pix_fmt', 'yuv420p',
+          '-crf', crfValue.toString(),
+          '-r', fps.toString(),
+          '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
+          '-fflags', '+genpts',     // Generate presentation timestamps
+          '-shortest',
+          '-y',
+          absoluteOutputPath
+        );
+      }
     }
 
     console.log('🎥 FFmpeg slideshow command: ffmpeg', ffmpegArgs.join(' '));
@@ -1118,15 +1313,47 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     }
   }
 
-  // Create intro/outro configuration if enabled
+  // Create intro configuration if enabled (outro removed per user request)
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
+  let introVoiceoverPath = null;
   
-  if (enableIntroOutro && backgroundMusicPath) {
+  if (enableIntroOutro) {
     introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
-    console.log(`🎭 Short video intro/outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
-    console.log(`⏱️ Total short video duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
+    console.log(`🎭 Short video intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
+    console.log(`⏱️ Total short video duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
+    
+    // Generate intro voiceover if intro is enabled
+    if (introOutroConfig.intro.enabled && introOutroConfig.intro.voiceoverText) {
+      console.log('🎤 Generating short video intro voiceover...');
+      const { generateVoiceover, getRandomVoice } = await import('./voiceover-generator.js');
+      introVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/short-intro-voiceover.mp3`);
+      
+      try {
+        // FIXED: Select a specific voice and store it for consistency between intro and main voiceover
+        // Use the same voice that will be used for the main voiceover (if already selected) or select one now
+        let selectedVoice = options.selectedVoiceId;
+        if (!selectedVoice) {
+          selectedVoice = getRandomVoice(options.voiceGender);
+          options.selectedVoiceId = selectedVoice; // Store for main voiceover to use
+        }
+        console.log(`🎤 Using consistent voice for short video intro and main: ${selectedVoice}`);
+        
+        // Use the same voice settings as the main voiceover for consistency
+        await generateVoiceover(
+          introOutroConfig.intro.voiceoverText,
+          introVoiceoverPath,
+          undefined, // Use default voice settings
+          options.voiceGender, // Pass voice gender for consistency
+          selectedVoice // Pass the specific voice ID to ensure consistency
+        );
+        console.log(`✅ Short video intro voiceover generated: ${introVoiceoverPath}`);
+      } catch (error) {
+        console.warn(`⚠️ Failed to generate short video intro voiceover: ${error.message}`);
+        introVoiceoverPath = null;
+      }
+    }
   }
 
   // Calculate duration per image for the short video
@@ -1144,16 +1371,14 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     
     let ffmpegArgs;
     
-    if (introOutroConfig && (introOutroConfig.intro.enabled || introOutroConfig.outro.enabled)) {
-      // Use intro/outro with complex filter for short video
+    if (introOutroConfig && introOutroConfig.intro.enabled) {
+      // Use intro with complex filter for short video (outro removed per user request)
       ffmpegArgs = [];
       let inputIndex = 0;
       
-      // Add intro image if enabled
-      if (introOutroConfig.intro.enabled) {
-        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
-        inputIndex++;
-      }
+      // Add intro image
+      ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.intro.duration.toString(), '-i', introOutroConfig.intro.imagePath);
+      inputIndex++;
       
       // Add main images
       for (let i = 0; i < absoluteImagePaths.length; i++) {
@@ -1161,23 +1386,26 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         inputIndex++;
       }
       
-      // Add outro image if enabled
-      if (introOutroConfig.outro.enabled) {
-        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+      // Add intro voiceover if available
+      let introVoiceoverIndex = null;
+      if (introVoiceoverPath) {
+        ffmpegArgs.push('-i', introVoiceoverPath);
+        introVoiceoverIndex = inputIndex;
         inputIndex++;
       }
       
-      // Add audio inputs
+      // Add main audio
       ffmpegArgs.push('-i', absoluteAudioPath);
-      const voiceoverIndex = inputIndex;
+      const mainVoiceoverIndex = inputIndex;
       inputIndex++;
       
+      // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
         inputIndex++;
       }
       
-      // Create complex filter for intro/outro short video
+      // Create complex filter for intro + short video
       const mainContentConfig = {
         imageCount: absoluteImagePaths.length,
         duration: audioDuration,
@@ -1188,10 +1416,11 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       const filterComplex = createIntroOutroFilter({
         introConfig: introOutroConfig.intro,
         mainContentConfig: mainContentConfig,
-        outroConfig: introOutroConfig.outro,
         backgroundMusicPath: backgroundMusicPath,
         totalDuration: totalVideoDuration,
-        resolution: resolution
+        resolution: resolution,
+        introVoiceoverIndex: introVoiceoverIndex,
+        mainVoiceoverIndex: mainVoiceoverIndex
       });
       
       ffmpegArgs.push(
@@ -1208,12 +1437,12 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-r', fps.toString(),
         '-avoid_negative_ts', 'make_zero',
         '-fflags', '+genpts',
-        '-shortest',
+        // Don't use -shortest with intro to allow full extended duration
         '-y',
         absoluteOutputPath
       );
       
-      console.log(`🎼 Short video mixing audio with intro/outro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%, outro: ${(introOutroConfig.outro.volume * 100).toFixed(0)}%)`);
+      console.log(`🎼 Short video mixing audio with intro: Voice (100%) + Background (intro: ${(introOutroConfig.intro.volume * 100).toFixed(0)}%, main: 15%)`);
       
     } else if (absoluteImagePaths.length === 1) {
       // Single image - use crop approach to fill frame properly
@@ -1297,7 +1526,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       
       // Scale and crop each image to fill frame properly
       for (let i = 0; i < absoluteImagePaths.length; i++) {
-        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
+        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
       }
       
       // Add simple concatenation for short video
@@ -1533,7 +1762,7 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
       
       // Scale and pad each image
       for (let i = 0; i < absoluteImagePaths.length; i++) {
-        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps}[v${i}];`;
+        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,fps=${fps}[v${i}];`;
       }
       
       // Concatenate all scaled images
