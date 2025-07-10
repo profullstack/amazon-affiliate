@@ -11,10 +11,10 @@ import { glob } from 'glob';
  */
 const selectRandomBackgroundMusic = async () => {
   try {
-    const mediaFiles = await glob('./media/*.wav');
+    const mediaFiles = await glob('./src/media/*.wav');
     
     if (mediaFiles.length === 0) {
-      console.log('📵 No background music files found in ./media/*.wav');
+      console.log('📵 No background music files found in ./src/media/*.wav');
       return null;
     }
     
@@ -78,8 +78,8 @@ const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
     outroDuration = 5.0,        // 5 second outro
     introVolume = 0.4,          // 40% volume for intro (higher than background)
     outroVolume = 0.4,          // 40% volume for outro (higher than background)
-    introImagePath = './media/banner.jpg',
-    outroImagePath = './media/profile.jpg'
+    introImagePath = './src/media/banner.jpg',
+    outroImagePath = './src/media/profile.jpg'
   } = options;
 
   // Check if intro/outro images exist
