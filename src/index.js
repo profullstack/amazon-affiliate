@@ -3,9 +3,10 @@ import { scrapeAmazonProduct } from './amazon-scraper.js';
 import { downloadImages, cleanupImages } from './image-downloader.js';
 import { generateVoiceover } from './voiceover-generator.js';
 import { generateAIReviewScript, generateAIVideoTitle, generateAIVideoDescription, generateAIShortVideoScript } from './openai-script-generator.js';
-import { createSlideshow, createShortVideo } from './video-creator.js';
+import { createSlideshow, createShortVideo, createVideoWithAffiliateOverlay } from './video-creator.js';
 import { createThumbnail } from './thumbnail-generator.js';
 import { uploadToYouTube, uploadBothVideosToYouTube } from './youtube-publisher.js';
+import { addCompleteInteractiveElements } from './youtube-interactive-elements.js';
 import { PromotionManager } from './promotion-manager.js';
 import { writeVideoDescription } from './description-writer.js';
 import fs from 'fs/promises';
@@ -23,7 +24,9 @@ const DEFAULT_OPTIONS = {
   autoPromote: false,
   promotionPlatforms: ['reddit', 'pinterest', 'twitter'],
   createShortVideo: true,
-  publishBothVideos: true // New option to control dual publishing
+  publishBothVideos: true, // New option to control dual publishing
+  enableAffiliateOverlay: false, // New option to enable affiliate text overlay on videos
+  setupInteractiveElements: false // New option to setup YouTube Cards and End Screens
 };
 
 /**
@@ -389,12 +392,45 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
       }
     };
 
-    const finalVideoPath = await createSlideshow(
-      imagePaths,
-      voiceoverPath,
-      videoPath,
-      videoOptions
-    );
+    let finalVideoPath;
+    
+    // Use affiliate overlay video creation if enabled
+    if (config.enableAffiliateOverlay) {
+      console.log('🎯 Creating video with affiliate overlay...');
+      const affiliateTag = process.env.AFFILIATE_TAG;
+      const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
+      
+      const productDataForOverlay = {
+        affiliateUrl,
+        title: productData.title,
+        price: productData.price || 'Check Amazon for current price'
+      };
+      
+      finalVideoPath = await createVideoWithAffiliateOverlay(
+        imagePaths,
+        voiceoverPath,
+        videoPath,
+        productDataForOverlay,
+        {
+          ...videoOptions,
+          overlayOptions: {
+            position: 'bottom',
+            startTime: 15,
+            duration: 8,
+            fontSize: 28,
+            backgroundColor: 'black@0.8',
+            textColor: 'white'
+          }
+        }
+      );
+    } else {
+      finalVideoPath = await createSlideshow(
+        imagePaths,
+        voiceoverPath,
+        videoPath,
+        videoOptions
+      );
+    }
     
     timings.videoCreation.end = Date.now();
     console.log(`✅ Video created: ${finalVideoPath}`);
@@ -697,6 +733,45 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         timings.youtubeUpload.end = Date.now();
         console.log(`✅ Video uploaded to YouTube: ${uploadResult.url}`);
       }
+
+      // Step 11.5: Setup interactive elements (if enabled)
+      if (config.setupInteractiveElements && uploadResult.videoId) {
+        reportProgress(config.onProgress, 'interactiveElements', 92, 'Setting up YouTube interactive elements');
+        
+        try {
+          console.log('\n🎯 Setting up YouTube interactive elements...');
+          const affiliateTag = process.env.AFFILIATE_TAG;
+          const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
+          
+          const productDataForInteractive = {
+            affiliateUrl,
+            title: productData.title,
+            price: productData.price || 'Check Amazon for current price'
+          };
+          
+          const interactiveResult = await addCompleteInteractiveElements(
+            uploadResult.videoId,
+            productDataForInteractive,
+            {
+              cardStartTime: 20,
+              endScreenDuration: 15,
+              includeCards: true,
+              includeEndScreen: true
+            }
+          );
+          
+          if (interactiveResult.success) {
+            console.log('✅ Interactive elements configuration prepared');
+            console.log('📋 Manual setup required in YouTube Studio:');
+            interactiveResult.instructions.forEach((instruction, index) => {
+              console.log(`   ${index + 1}. ${instruction}`);
+            });
+          }
+        } catch (error) {
+          console.warn(`⚠️ Interactive elements setup failed: ${error.message}`);
+          console.log('📹 Video was uploaded successfully, but interactive elements need manual setup');
+        }
+      }
       
       // Step 11: Promote video (if enabled)
       let promotionResults = null;
@@ -909,6 +984,8 @@ Options:
   --no-dual-publish        Disable dual publishing (upload only long video)
   --woman                  Use female voice for voiceover generation
   --man                    Use male voice for voiceover generation
+  --affiliate-overlay      Add affiliate text overlay burned into the video
+  --interactive-elements   Setup YouTube Cards and End Screens (requires manual completion)
 
 Examples:
   # Using full URL
@@ -988,6 +1065,14 @@ Examples:
       case '--man':
       case '--male':
         options.voiceGender = 'male';
+        i--; // No value for this flag
+        break;
+      case '--affiliate-overlay':
+        options.enableAffiliateOverlay = true;
+        i--; // No value for this flag
+        break;
+      case '--interactive-elements':
+        options.setupInteractiveElements = true;
         i--; // No value for this flag
         break;
     }

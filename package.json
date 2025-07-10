@@ -47,6 +47,7 @@
     "cheerio": "^1.1.0",
     "dotenv": "^16.3.1",
     "fluent-ffmpeg": "^2.1.2",
+    "glob": "^10.3.10",
     "googleapis": "^131.0.0",
     "node-cron": "^4.2.0",
     "node-fetch": "^3.3.2",

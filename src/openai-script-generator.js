@@ -210,6 +210,7 @@ Create a natural, flowing presentation script that seamlessly covers these eleme
 - Mention that you'll be showing the product images during the review
 - Give your genuine opinion based on the product information
 - End with a clear recommendation and call-to-action
+- MANDATORY: Must end with the exact phrase "Don't forget to like and share and click the link in the description to purchase"
 
 CRITICAL: Do NOT include any section titles, headers, or labels like "Introduction:", "Overview:", "Features:", etc. The script should flow naturally like a conversation without any structural markers.
 
@@ -313,7 +314,7 @@ const processProductDescription = (description) => {
  * @param {Object} productData - Product information
  * @returns {string} Fallback script
  */
-const generateFallbackScript = (productData) => {
+export const generateFallbackScript = (productData) => {
   // Ensure productData exists and has default values
   if (!productData || typeof productData !== 'object') {
     productData = {};
@@ -348,7 +349,7 @@ const generateFallbackScript = (productData) => {
     ? `With a ${rating} star rating, customers seem pretty satisfied.`
     : 'It has received positive feedback from users.';
 
-  return `${intro} ... ${featuresText} ... ${priceText} ... ${ratingText} ... Overall, I think this could be a solid choice if you're in the market for this type of product. ... Thanks for watching, and let me know what you think in the comments!`;
+  return `${intro} ... ${featuresText} ... ${priceText} ... ${ratingText} ... Overall, I think this could be a solid choice if you're in the market for this type of product. ... Don't forget to like and share and click the link in the description to purchase.`;
 };
 
 /**
@@ -817,6 +818,7 @@ STYLE GUIDELINES:
 - Use "I" statements to make it personal
 - When mentioning prices, always say "dollars" (e.g., "fifty dollars") instead of just "$"
 - End with a clear call-to-action
+- MANDATORY: Must end with the exact phrase "Don't forget to like and share and click the link in the description to purchase"
 
 TONE: Energetic, authentic, and helpful - like you're excitedly telling a friend about a great find.
 
@@ -899,3 +901,4 @@ const postProcessShortScript = (script) => {
   
   return processed;
 };
+
