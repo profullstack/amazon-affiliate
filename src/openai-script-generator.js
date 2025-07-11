@@ -445,7 +445,7 @@ export const generateAIVideoTitle = async (productData, options = {}) => {
   try {
     const openai = createOpenAIClient();
 
-    const prompt = `Create an engaging, SEO-optimized YouTube video title for this Amazon product review. The title should be clickable, informative, and under 60 characters for optimal display.
+    const prompt = `Create an engaging, SEO-optimized YouTube video title for this Amazon product review. The title should be clickable, informative, and MUST be under 95 characters (YouTube's limit is 100, but we need a safety margin).
 
 PRODUCT DETAILS:
 - Product Name: ${title}
@@ -454,7 +454,7 @@ PRODUCT DETAILS:
 - Key Features: ${Array.isArray(features) ? features.slice(0, 3).join(', ') : 'Not specified'}
 
 TITLE REQUIREMENTS:
-1. Must be under 60 characters for full mobile display
+1. CRITICAL: Must be under 95 characters (YouTube enforces 100-character limit)
 2. Include the main product name or category
 3. Add compelling words like "Review", "Worth It?", "Honest Opinion", "Before You Buy"
 4. Make it clickable and curiosity-driven
@@ -496,12 +496,19 @@ Generate 1 optimized title that balances SEO, engagement, and honesty:`;
     }
 
     // Clean up the title
-    const cleanTitle = generatedTitle
+    let cleanTitle = generatedTitle
       .replace(/^["']|["']$/g, '') // Remove quotes
       .replace(/^\d+\.\s*/, '') // Remove numbering
       .trim();
 
-    console.log(`✅ AI title generated: "${cleanTitle}"`);
+    // Ensure title meets YouTube's 100-character limit (with safety margin)
+    const maxLength = 95; // Leave 5 characters buffer for safety
+    if (cleanTitle.length > maxLength) {
+      cleanTitle = cleanTitle.substring(0, maxLength - 3).trim() + '...';
+      console.log(`⚠️ Title truncated to ${cleanTitle.length} characters for YouTube compatibility`);
+    }
+
+    console.log(`✅ AI title generated: "${cleanTitle}" (${cleanTitle.length} chars)`);
     
     return cleanTitle;
 
@@ -635,7 +642,7 @@ Generate a comprehensive description (aim for 200-300 words):`;
  * @param {Object} productData - Product information
  * @returns {string} Fallback title
  */
-const generateFallbackTitle = (productData) => {
+export const generateFallbackTitle = (productData) => {
   const { title = 'Product', price = '' } = productData || {};
   
   // Extract main product name (first few words)
@@ -651,9 +658,10 @@ const generateFallbackTitle = (productData) => {
   
   const selectedTemplate = titleTemplates[Math.floor(Math.random() * titleTemplates.length)];
   
-  // Ensure under 60 characters
-  return selectedTemplate.length > 60
-    ? selectedTemplate.substring(0, 57) + '...'
+  // Ensure under YouTube's 100-character limit (with safety margin)
+  const maxLength = 95; // Leave 5 characters buffer for safety
+  return selectedTemplate.length > maxLength
+    ? selectedTemplate.substring(0, maxLength - 3) + '...'
     : selectedTemplate;
 };
 

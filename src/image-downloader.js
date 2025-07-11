@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import path from 'path';
+import { createTempFilePath } from './utils/temp-file-manager.js';
 
 /**
  * Validates if a URL is a valid HTTP/HTTPS URL
@@ -134,7 +135,8 @@ const downloadSingleImage = async (url, filePath, retries = 2) => {
 export const downloadImages = async (
   imageUrls = [],
   tempDir = './temp',
-  concurrency = 3  // Reduced to be more respectful to servers
+  concurrency = 3,  // Reduced to be more respectful to servers
+  options = {}
 ) => {
   if (!imageUrls || imageUrls.length === 0) {
     return [];
@@ -163,10 +165,12 @@ export const downloadImages = async (
     const batch = validUrls.slice(i, i + concurrency);
     
     const batchPromises = batch.map(async (url, batchIndex) => {
-      const globalIndex = i + batchIndex;
+      const globalIndex = i + batchIndex + 1; // Start from 1 instead of 0
       const extension = getFileExtension(url);
       const fileName = `image-${globalIndex}${extension}`;
-      const filePath = path.join(tempDir, fileName);
+      const filePath = options.sessionId
+        ? createTempFilePath(tempDir, fileName, options.sessionId)
+        : path.join(tempDir, fileName);
       
       try {
         const success = await downloadSingleImage(url, filePath);

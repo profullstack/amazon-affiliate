@@ -323,7 +323,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     timings.imageDownload = { start: Date.now() };
     
     const imagesToDownload = productData.images.slice(0, config.maxImages);
-    const imagePaths = await downloadImages(imagesToDownload, config.tempDir);
+    const imagePaths = await downloadImages(imagesToDownload, config.tempDir, 3, { sessionId });
     
     timings.imageDownload.end = Date.now();
     tempFiles.push(...imagePaths);
@@ -459,11 +459,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         });
         console.log(`✅ Short video script generated: ${shortVideoScript.length} characters`);
         
-        // Generate short video voiceover
+        // Generate short video voiceover with unique naming
         console.log('🎤 Generating short video voiceover...');
         shortVoiceoverPath = await generateVoiceover(
           shortVideoScript,
-          `${config.tempDir}/short-voiceover.mp3`,
+          voiceoverPaths.paths.short,
           undefined, // Use default voice settings
           config.voiceGender
         );
@@ -523,7 +523,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     reportProgress(config.onProgress, 'thumbnailCreation', 82, 'Creating YouTube thumbnail');
     timings.thumbnailCreation = { start: Date.now() };
     
-    const thumbnailPath = `${config.outputDir}/${safeFilename}-thumbnail.jpg`;
+    const thumbnailPath = outputPaths.paths.thumbnail;
     let finalThumbnailPath = null;
     let promotionThumbnailPath = null;
     
@@ -599,7 +599,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
       
       // Create short video thumbnail
       try {
-        const shortThumbnailPath = `${config.outputDir}/${safeFilename}-short.thumb.jpg`;
+        const shortThumbnailPath = outputPaths.paths.shortThumbnail;
         const shortThumbnailResult = await createThumbnail(
           productData,
           shortThumbnailPath,
@@ -691,7 +691,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         
         const dualUploadOptions = {
           thumbnailPath: finalThumbnailPath,
-          shortThumbnailPath: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.thumb.jpg` : null,
+          shortThumbnailPath: shortVideoPath ? outputPaths.paths.shortThumbnail : null,
           tags: ['Amazon', 'Affiliate', 'Review'],
           categoryId: '26',
           privacyStatus: 'public',
@@ -918,7 +918,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           video: finalVideoPath,
           shortVideo: shortVideoPath,
           thumbnail: finalThumbnailPath,
-          shortThumbnail: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.thumb.jpg` : null,
+          shortThumbnail: shortVideoPath ? outputPaths.paths.shortThumbnail : null,
           promotionThumbnail: promotionThumbnailPath,
           description: descriptionFilePath,
           shortDescription: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.md` : null

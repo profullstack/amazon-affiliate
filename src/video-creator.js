@@ -77,8 +77,8 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
   const audioFilter = [
     // Background music processing: loop, fade in/out, volume control
     `[1:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${safeFadeIn},afade=t=out:st=${fadeOutStart}:d=${safeFadeOut},volume=${safeBackgroundVolume}[bg];`,
-    // Voiceover processing: ensure consistent volume
-    `[0:a]volume=${safeVoiceVolume}[voice];`,
+    // Voiceover processing: ensure consistent volume with 50% reduction for safety
+    `[0:a]volume=${safeVoiceVolume * 0.5}[voice];`,
     // Mix both audio streams
     `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out]`
   ].join('');
@@ -285,40 +285,40 @@ export const createIntroOutroFilter = (config) => {
 
     if (introVoiceoverIndex !== null && introConfig.enabled) {
       // FIXED: Use correct audio inputs - intro voiceover and main voiceover are separate files
-      // Intro voiceover: trim to intro duration and play from start
-      filterComplex += `[${introVoiceoverIndex}:a]volume=1.0,atrim=0:${introEnd}[intro_voice];`;
-      // Main voiceover: delay by intro duration so it starts after intro ends
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
+      // Intro voiceover: trim to intro duration and play from start with volume control
+      filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
+      // Main voiceover: delay by intro duration so it starts after intro ends with volume control
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
       // Combine intro and delayed main voiceover (they won't overlap due to delay)
       filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[combined_voice];`;
       // Mix combined voice with background music
       filterComplex += `[combined_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
     } else if (introConfig.enabled) {
-      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_voice];`;
+      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro with volume control
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_voice];`;
       filterComplex += `[delayed_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
     } else {
-      // No intro - main voiceover starts immediately
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0[voice];`;
+      // No intro - main voiceover starts immediately with volume control
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5[voice];`;
       filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
     }
   } else {
     // No background music
     if (introVoiceoverIndex !== null && introConfig.enabled) {
-      // FIXED: Use correct audio inputs without background music
-      // Intro voiceover: trim to intro duration and play from start
-      filterComplex += `[${introVoiceoverIndex}:a]volume=1.0,atrim=0:${introEnd}[intro_voice];`;
-      // Main voiceover: delay by intro duration so it starts after intro ends
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
+      // FIXED: Use correct audio inputs without background music with volume control
+      // Intro voiceover: trim to intro duration and play from start with volume control
+      filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
+      // Main voiceover: delay by intro duration so it starts after intro ends with volume control
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
       // Combine intro and delayed main voiceover (they won't overlap due to delay)
       filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[audio_out];`;
     } else if (introConfig.enabled) {
-      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro
+      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro with volume control
       const introEnd = introConfig.enabled ? introConfig.duration : 0;
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0,adelay=${introEnd * 1000}|${introEnd * 1000}[audio_out];`;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[audio_out];`;
     } else {
-      // No intro - main voiceover starts immediately
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=1.0[audio_out];`;
+      // No intro - main voiceover starts immediately with volume control
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5[audio_out];`;
     }
   }
 
@@ -637,6 +637,8 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-map', '[final_v]',
         '-map', '[audio_out]',
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -648,7 +650,6 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -675,6 +676,8 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-map', '0:v',
         '-map', '[audio_out]',
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -686,7 +689,6 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -704,6 +706,8 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-i', absoluteAudioPath,
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -715,7 +719,6 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-b:a', '96k',           // Lower bitrate for compatibility
         '-ar', '44100',           // Fixed sample rate
         '-ac', '2',               // Stereo audio
-        '-af', 'volume=0.5',      // Reduce volume to prevent loud audio
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
@@ -978,6 +981,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         '-map', '[final_v]',
         '-map', '[audio_out]',
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -989,7 +994,6 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -1051,8 +1055,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
-        // Update the filter complex to include background music mixing
-        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
+        // Update the filter complex to include background music mixing with volume control
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.5}[voice];`;
         filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
         filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
         
@@ -1061,6 +1065,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-map', '[outv]',
           '-map', '[audio_out]',
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'slow',
           '-profile:v', 'baseline',
@@ -1072,7 +1078,6 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-af', 'volume=0.5',
           '-f', 'mp4',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
@@ -1088,6 +1093,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-map', '[outv]',
           '-map', `${absoluteImagePaths.length}:a:0`,
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'slow',
           '-profile:v', 'baseline',
@@ -1099,7 +1106,6 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-b:a', '96k',           // Lower bitrate for compatibility
           '-ar', '44100',           // Fixed sample rate
           '-ac', '2',               // Stereo audio
-          '-af', 'volume=0.5',      // Reduce volume to prevent loud audio
           '-f', 'mp4',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
@@ -1524,6 +1530,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-map', '[final_v]',
         '-map', '[audio_out]',
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -1535,7 +1543,6 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -1567,6 +1574,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-map', '0:v',
           '-map', '[audio_out]',
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'slow',
           '-profile:v', 'baseline',
@@ -1578,7 +1587,6 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-af', 'volume=0.5',
           '-f', 'mp4',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
@@ -1596,6 +1604,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-i', absoluteAudioPath,
           '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'medium',
           '-profile:v', 'main',
@@ -1662,8 +1672,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
-        // Update the filter complex to include background music mixing
-        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
+        // Update the filter complex to include background music mixing with volume control
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.5}[voice];`;
         filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
         filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
         
@@ -1672,6 +1682,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-map', '[outv]',
           '-map', '[audio_out]',
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'slow',
           '-profile:v', 'baseline',
@@ -1683,7 +1695,6 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-af', 'volume=0.5',
           '-f', 'mp4',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
@@ -1699,6 +1710,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-map', '[outv]',
           '-map', `${absoluteImagePaths.length}:a:0`,
           '-pix_fmt', 'yuv420p',
+          '-color_range', 'tv',
+          '-colorspace', 'bt709',
           '-c:v', 'libx264',
           '-preset', 'slow',
           '-profile:v', 'baseline',
@@ -1710,7 +1723,6 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-af', 'volume=0.5',
           '-f', 'mp4',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
@@ -1859,6 +1871,8 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-i', absoluteAudioPath,
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,${overlayConfig.overlayFilter}`,
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -1870,7 +1884,6 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -1918,6 +1931,8 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-map', '[outv]',
         '-map', `${absoluteImagePaths.length}:a:0`,
         '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-colorspace', 'bt709',
         '-c:v', 'libx264',
         '-preset', 'slow',
         '-profile:v', 'baseline',
@@ -1929,7 +1944,6 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-af', 'volume=0.5',
         '-f', 'mp4',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
