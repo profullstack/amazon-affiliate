@@ -307,6 +307,8 @@ async function createVerticalThumbnail(framePath, outputPath) {
  * @param {string} outputPath - Path where thumbnail should be saved
  * @param {Object} options - Options for thumbnail creation
  * @param {boolean} options.isVertical - Whether to create vertical format (1080x1920) for short videos
+ * @param {string} options.tempDir - Temporary directory to use (defaults to './temp')
+ * @param {string} options.sessionId - Session ID for finding session-specific files
  * @returns {Promise<string>} - Path to created thumbnail
  */
 export const createThumbnail = async (productData, outputPath, options = {}) => {
@@ -314,21 +316,39 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
     // Check if ImageMagick is available for stylish thumbnails
     const magickAvailable = await isImageMagickAvailable();
     
-    // Look for existing downloaded images in temp directory first
-    const tempDir = './temp';
+    // Use provided temp directory or default
+    const tempDir = options.tempDir || './temp';
+    const sessionId = options.sessionId;
     await fs.mkdir(tempDir, { recursive: true });
     
     let sourceImagePath = null;
     
     // Try to find an existing downloaded image
-    const possibleImages = [
+    // If we have a session ID, look for session-specific files first
+    const possibleImages = [];
+    
+    if (sessionId) {
+      // Look for session-specific image files first
+      for (let i = 1; i <= 5; i++) {
+        possibleImages.push(path.join(tempDir, `image-${i}-${sessionId}.jpg`));
+      }
+      // Also check for other session-specific files
+      possibleImages.push(
+        path.join(tempDir, `thumbnail-product-image-${sessionId}.jpg`),
+        path.join(tempDir, `test-image-${sessionId}.png`),
+        path.join(tempDir, `test-image-1-${sessionId}.png`)
+      );
+    }
+    
+    // Fallback to non-session-specific files
+    possibleImages.push(
       path.join(tempDir, 'image-1.jpg'),
       path.join(tempDir, 'image-2.jpg'),
       path.join(tempDir, 'image-3.jpg'),
       path.join(tempDir, 'thumbnail-product-image.jpg'),
       path.join(tempDir, 'test-image.png'),
       path.join(tempDir, 'test-image-1.png')
-    ];
+    );
     
     for (const imagePath of possibleImages) {
       try {
@@ -349,7 +369,8 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
 
       // Select the highest quality image for thumbnail
       const bestImageUrl = selectBestQualityImage(productData.images);
-      const tempImagePath = path.join(tempDir, 'temp-thumbnail-source.jpg');
+      const tempImageFilename = sessionId ? `temp-thumbnail-source-${sessionId}.jpg` : 'temp-thumbnail-source.jpg';
+      const tempImagePath = path.join(tempDir, tempImageFilename);
       
       console.log(`📥 Downloading high-quality image for thumbnail: ${bestImageUrl}`);
       
@@ -419,7 +440,7 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
         );
         
         // Only cleanup temp image if we downloaded it (not if we used existing)
-        if (sourceImagePath.includes('temp-thumbnail-source.jpg')) {
+        if (sourceImagePath.includes('temp-thumbnail-source')) {
           try {
             await fs.unlink(sourceImagePath);
           } catch (error) {
@@ -461,7 +482,7 @@ export const createThumbnail = async (productData, outputPath, options = {}) => 
     }
     
     // Only cleanup temp image if we downloaded it (not if we used existing)
-    if (sourceImagePath.includes('temp-thumbnail-source.jpg')) {
+    if (sourceImagePath.includes('temp-thumbnail-source')) {
       try {
         await fs.unlink(sourceImagePath);
       } catch (error) {

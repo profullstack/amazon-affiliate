@@ -547,7 +547,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     try {
       finalThumbnailPath = await createThumbnail(
         productData,
-        thumbnailPath
+        thumbnailPath,
+        {
+          tempDir: config.tempDir,
+          sessionId: sessionId
+        }
       );
       
       // Only create PNG version if promotion is enabled
@@ -620,7 +624,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         const shortThumbnailResult = await createThumbnail(
           productData,
           shortThumbnailPath,
-          { isVertical: true }
+          {
+            isVertical: true,
+            tempDir: config.tempDir,
+            sessionId: sessionId
+          }
         );
         console.log(`✅ Short video thumbnail created: ${shortThumbnailResult}`);
       } catch (error) {
