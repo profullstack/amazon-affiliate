@@ -10,7 +10,9 @@ import { addCompleteInteractiveElements } from './youtube-interactive-elements.j
 import { PromotionManager } from './promotion-manager.js';
 import { writeVideoDescription } from './description-writer.js';
 import { videoCompletionBeep, youtubeReadyBeep } from './utils/system-notifications.js';
+import { generateSessionId, createVoiceoverFilePaths, createOutputFilePaths } from './utils/temp-file-manager.js';
 import fs from 'fs/promises';
+import path from 'path';
 
 /**
  * Default configuration options
@@ -299,6 +301,22 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     
     reportProgress(config.onProgress, 'validation', 5, 'Validating Amazon input');
 
+    // Generate unique session ID for this video creation session
+    const sessionId = generateSessionId();
+    console.log(`🔑 Session ID: ${sessionId}`);
+
+    // Create unique file paths for this session
+    const voiceoverPaths = createVoiceoverFilePaths(config.tempDir, {
+      includeMain: true,
+      includeShort: config.createShortVideo,
+      includeIntro: config.enableIntroOutro
+    }, sessionId);
+
+    const outputPaths = createOutputFilePaths(config.outputDir, 'affiliate-video', {
+      includeShort: config.createShortVideo,
+      includeThumbnails: true
+    }, sessionId);
+
     // Ensure directories exist
     await fs.mkdir(config.tempDir, { recursive: true });
     await fs.mkdir(config.outputDir, { recursive: true });
@@ -352,7 +370,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     
     const voiceoverPath = await generateVoiceover(
       voiceoverText,
-      `${config.tempDir}/voiceover.mp3`,
+      voiceoverPaths.paths.main,
       undefined, // Use default voice settings
       config.voiceGender
     );
@@ -381,10 +399,10 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     // Ensure output directory exists
     await fs.mkdir(config.outputDir, { recursive: true });
     
-    const videoPath = `${config.outputDir}/${safeFilename}.mp4`;
+    const videoPath = outputPaths.paths.video;
     
     console.log(`📁 Output directory: ${config.outputDir}`);
-    console.log(`📄 Video filename: ${safeFilename}.mp4`);
+    console.log(`📄 Video filename: ${path.basename(videoPath)}`);
     
     const videoOptions = {
       quality: config.videoQuality,
@@ -471,10 +489,9 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         console.log(`✅ Short video voiceover generated: ${shortVoiceoverPath}`);
         
         // Create short video
-        const shortVideoFilename = `${safeFilename}-short.mp4`;
-        shortVideoPath = `${config.outputDir}/${shortVideoFilename}`;
+        shortVideoPath = outputPaths.paths.shortVideo;
         
-        console.log(`📱 Creating short video: ${shortVideoFilename}`);
+        console.log(`📱 Creating short video: ${path.basename(shortVideoPath)}`);
         
         const shortVideoOptions = {
           resolution: '1080x1920', // Vertical format for mobile
@@ -921,7 +938,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           shortThumbnail: shortVideoPath ? outputPaths.paths.shortThumbnail : null,
           promotionThumbnail: promotionThumbnailPath,
           description: descriptionFilePath,
-          shortDescription: shortVideoPath ? `${config.outputDir}/${safeFilename}-short.md` : null
+          shortDescription: shortVideoPath ? `${config.outputDir}/${path.basename(shortVideoPath, '.mp4')}.md` : null
         },
         stats: {
           imagesDownloaded: imagePaths.length,
