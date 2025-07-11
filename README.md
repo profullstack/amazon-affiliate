@@ -4,7 +4,9 @@
 
 ## Overview
 
-This tool automates the entire process of creating affiliate marketing videos from Amazon product URLs or IDs. It scrapes product information, downloads images, generates AI-powered review scripts and voiceovers, creates professional slideshow videos, and can automatically upload to YouTube and promote on social media platforms.
+This tool automates the entire process of creating affiliate marketing videos from Amazon product URLs or IDs. It uses the **Rainforest API** to fetch reliable product information, downloads high-quality images, generates AI-powered review scripts and voiceovers, creates professional slideshow videos, and can automatically upload to YouTube and promote on social media platforms.
+
+> **🌧️ Now powered by Rainforest API** - More reliable, faster, and higher quality data than web scraping!
 
 ## Features
 
@@ -47,6 +49,7 @@ cp .env.example .env
 ```
 
 Required environment variables:
+- `RAINFOREST_API_KEY` - Rainforest API key for Amazon product data
 - `OPENAI_API_KEY` - OpenAI API key for script generation
 - `ELEVENLABS_API_KEY` - ElevenLabs API key for voiceovers
 - `YOUTUBE_CLIENT_ID` - YouTube API client ID

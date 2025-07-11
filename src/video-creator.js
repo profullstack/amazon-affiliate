@@ -1570,7 +1570,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-i', absoluteAudioPath,
           '-i', backgroundMusicPath,
           '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
-          '-filter_complex', backgroundMusicConfig.audioFilter,
+          '-filter_complex', backgroundMusicConfig.audioFilter.replace('volume=0.5', 'volume=0.3,alimiter=level_in=1:level_out=0.8:limit=0.8').replace('amix=inputs=2:duration=first:dropout_transition=2', 'amix=inputs=2:duration=first:dropout_transition=3:normalize=0'),
           '-map', '0:v',
           '-map', '[audio_out]',
           '-pix_fmt', 'yuv420p',
@@ -1672,10 +1672,14 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
-        // Update the filter complex to include background music mixing with volume control
-        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.5}[voice];`;
-        filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
-        filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+        // FIXED: Use safer audio mixing for short videos to prevent beep noise
+        // Apply additional volume reduction and safer mixing parameters
+        const safeVoiceVolume = Math.min(backgroundMusicConfig.settings.voiceoverVolume * 0.3, 0.7); // Further reduced
+        const safeBackgroundVolume = Math.min(backgroundMusicConfig.settings.backgroundVolume * 0.5, 0.1); // Much lower background
+        
+        filterComplex += `[${audioInputIndex}:a]volume=${safeVoiceVolume},alimiter=level_in=1:level_out=0.8:limit=0.8[voice];`;
+        filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${safeBackgroundVolume},alimiter=level_in=1:level_out=0.5:limit=0.5[bg];`;
+        filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[audio_out];`;
         
         ffmpegArgs.push(
           '-filter_complex', filterComplex,
