@@ -4,6 +4,15 @@ import path from 'path';
 import { processImagesWithSmartBackground } from './image-processor.js';
 import { generateAffiliateOverlay } from './youtube-interactive-elements.js';
 import { glob } from 'glob';
+import {
+  createSafeAudioFilter,
+  normalizeVolume,
+  validateFadeDuration,
+  checkAudioClipping,
+  logAudioConfig,
+  analyzeAudioFile,
+  AUDIO_LIMITS
+} from './utils/audio-utils.js';
 
 /**
  * Finds and randomly selects a background music file from ./media/*.wav
@@ -42,26 +51,55 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
     voiceoverVolume = 1.0     // 100% volume for voiceover
   } = options;
 
-  const fadeOutStart = Math.max(0, videoDuration - fadeOutDuration);
+  console.log('🔧 Creating safe background music filter...');
+  
+  // Normalize volumes using safe audio utilities
+  const safeVoiceVolume = normalizeVolume(voiceoverVolume, 'voice');
+  const safeBackgroundVolume = normalizeVolume(backgroundVolume, 'background');
+  const safeFadeIn = validateFadeDuration(fadeInDuration);
+  const safeFadeOut = validateFadeDuration(fadeOutDuration);
+
+  // Check for clipping
+  const clippingAnalysis = checkAudioClipping({
+    voice: safeVoiceVolume,
+    background: safeBackgroundVolume
+  });
+
+  if (!clippingAnalysis.willClip) {
+    console.log('✅ Audio levels are safe - no clipping risk detected');
+  } else {
+    console.warn('⚠️ Audio clipping risk detected in background music filter');
+  }
+
+  const fadeOutStart = Math.max(0, videoDuration - safeFadeOut);
   
   // Create complex audio filter for mixing voiceover with background music
   const audioFilter = [
     // Background music processing: loop, fade in/out, volume control
-    `[1:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${fadeInDuration},afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration},volume=${backgroundVolume}[bg];`,
+    `[1:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${safeFadeIn},afade=t=out:st=${fadeOutStart}:d=${safeFadeOut},volume=${safeBackgroundVolume}[bg];`,
     // Voiceover processing: ensure consistent volume
-    `[0:a]volume=${voiceoverVolume}[voice];`,
+    `[0:a]volume=${safeVoiceVolume}[voice];`,
     // Mix both audio streams
     `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out]`
   ].join('');
+
+  // Log the safe configuration
+  logAudioConfig({
+    voiceoverVolume: safeVoiceVolume,
+    backgroundVolume: safeBackgroundVolume,
+    fadeInDuration: safeFadeIn,
+    fadeOutDuration: safeFadeOut,
+    clippingAnalysis
+  }, 'Background Music Filter');
 
   return {
     audioFilter,
     backgroundMusicPath,
     settings: {
-      backgroundVolume,
-      fadeInDuration,
-      fadeOutDuration,
-      voiceoverVolume
+      backgroundVolume: safeBackgroundVolume,
+      fadeInDuration: safeFadeIn,
+      fadeOutDuration: safeFadeOut,
+      voiceoverVolume: safeVoiceVolume
     }
   };
 };
@@ -75,10 +113,17 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
 const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
   const {
     introDuration = 5.0,        // 5 second intro
-    introVolume = 1.0,          // 100% volume for intro music (per user request)
+    introVolume = 0.4,          // FIXED: 40% volume for intro music (was 100% - too loud!)
     introImagePath = './src/media/banner.jpg',
     introVoiceoverText = 'Welcome to The Professional Prompt where we review your favorite products'
   } = options;
+
+  // Normalize intro volume to prevent loud noise
+  const safeIntroVolume = normalizeVolume(introVolume, 'intro');
+  
+  if (safeIntroVolume !== introVolume) {
+    console.log(`🔧 Intro volume normalized: ${introVolume} → ${safeIntroVolume} (was too loud!)`);
+  }
 
   // Check if intro image exists
   const introExists = await checkFileExists(introImagePath);
@@ -92,7 +137,7 @@ const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
       enabled: introExists,
       imagePath: introImagePath,
       duration: introDuration,
-      volume: introVolume,
+      volume: safeIntroVolume,  // Use normalized safe volume
       voiceoverText: introVoiceoverText
     },
     outro: {
@@ -205,26 +250,36 @@ export const createIntroOutroFilter = (config) => {
 
     let musicFilter = `[${musicIndex}:a]aloop=loop=-1:size=2e+09`;
     
-    // Apply different volumes for intro vs main content
+    // Apply different volumes for intro vs main content with SAFE levels
     if (introConfig.enabled && introVoiceoverIndex !== null) {
       // Get intro voiceover duration to determine when narration ends
       // For now, assume narration takes 70% of intro duration, then music volume increases
       const narrationEnd = introEnd * 0.7;
       
-      // Low volume (20%) during intro narration to not drown out voice
-      musicFilter += `,volume=enable='between(t,0,${narrationEnd})':volume=0.2`;
-      // Higher volume (60%) after narration ends for remainder of intro
-      musicFilter += `,volume=enable='between(t,${narrationEnd},${introEnd})':volume=0.6`;
+      // FIXED: Use safe volume levels to prevent loud noise
+      const narrationVolume = normalizeVolume(0.1, 'background'); // 10% during narration
+      const postNarrationVolume = normalizeVolume(0.3, 'intro');  // 30% after narration (was 60% - too loud!)
+      
+      musicFilter += `,volume=enable='between(t,0,${narrationEnd})':volume=${narrationVolume}`;
+      musicFilter += `,volume=enable='between(t,${narrationEnd},${introEnd})':volume=${postNarrationVolume}`;
+      
+      console.log(`🎵 Intro music volumes: narration=${(narrationVolume*100).toFixed(0)}%, post-narration=${(postNarrationVolume*100).toFixed(0)}%`);
     } else if (introConfig.enabled) {
-      // No intro voiceover - use normal intro volume
-      musicFilter += `,volume=enable='between(t,0,${introEnd})':volume=${introConfig.volume}`;
+      // No intro voiceover - use normalized intro volume
+      const safeIntroVolume = normalizeVolume(introConfig.volume, 'intro');
+      musicFilter += `,volume=enable='between(t,0,${introEnd})':volume=${safeIntroVolume}`;
+      console.log(`🎵 Intro music volume: ${(safeIntroVolume*100).toFixed(0)}%`);
     }
     
-    // Lower volume during main content (15% as before)
-    musicFilter += `,volume=enable='between(t,${introEnd},${mainEnd})':volume=${mainContentConfig.backgroundVolume}`;
+    // Lower volume during main content with normalization
+    const safeBackgroundVolume = normalizeVolume(mainContentConfig.backgroundVolume, 'background');
+    musicFilter += `,volume=enable='between(t,${introEnd},${mainEnd})':volume=${safeBackgroundVolume}`;
+    console.log(`🎵 Main content background volume: ${(safeBackgroundVolume*100).toFixed(0)}%`);
     
-    // Add fade in/out
-    musicFilter += `,afade=t=in:st=0:d=2,afade=t=out:st=${totalDuration - 2}:d=2[bg];`;
+    // Add fade in/out with validated durations
+    const safeFadeIn = validateFadeDuration(2.0);
+    const safeFadeOut = validateFadeDuration(2.0);
+    musicFilter += `,afade=t=in:st=0:d=${safeFadeIn},afade=t=out:st=${totalDuration - safeFadeOut}:d=${safeFadeOut}[bg];`;
     
     filterComplex += musicFilter;
 
@@ -581,17 +636,23 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-filter_complex', filterComplex,
         '-map', '[final_v]',
         '-map', '[audio_out]',
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-fflags', '+genpts',
-        // Don't use -shortest with intro to allow full extended duration
+        '-shortest',
         '-y',
         absoluteOutputPath
       );
@@ -613,16 +674,23 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-filter_complex', backgroundMusicConfig.audioFilter,
         '-map', '0:v',
         '-map', '[audio_out]',
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-fflags', '+genpts',
+        '-shortest',
         '-shortest',
         '-y',
         absoluteOutputPath
@@ -635,16 +703,23 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         '-i', absoluteImagePath,
         '-i', absoluteAudioPath,
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',           // Fixed audio bitrate for consistency
+        '-b:a', '96k',           // Lower bitrate for compatibility
         '-ar', '44100',           // Fixed sample rate
         '-ac', '2',               // Stereo audio
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',      // Reduce volume to prevent loud audio
+        '-f', 'mp4',
+        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
-        '-fflags', '+genpts',     // Generate presentation timestamps
+        '-shortest',
         '-shortest',
         '-y',
         absoluteOutputPath
@@ -902,16 +977,23 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         '-filter_complex', filterComplex,
         '-map', '[final_v]',
         '-map', '[audio_out]',
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-fflags', '+genpts',
+        '-shortest',
         // Don't use -shortest with intro to allow full extended duration
         '-y',
         absoluteOutputPath
@@ -978,16 +1060,23 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-filter_complex', filterComplex,
           '-map', '[outv]',
           '-map', '[audio_out]',
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'slow',
+          '-profile:v', 'baseline',
+          '-level:v', '3.0',
+          '-crf', crfValue.toString(),
+          '-r', '25',
+          '-g', '50',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-af', 'volume=0.5',
+          '-f', 'mp4',
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
-          '-fflags', '+genpts',
+          '-shortest',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -998,16 +1087,23 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
           '-filter_complex', filterComplex,
           '-map', '[outv]',
           '-map', `${absoluteImagePaths.length}:a:0`,
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'slow',
+          '-profile:v', 'baseline',
+          '-level:v', '3.0',
+          '-crf', crfValue.toString(),
+          '-r', '25',
+          '-g', '50',
           '-c:a', 'aac',
-          '-b:a', '128k',           // Fixed audio bitrate for consistency
+          '-b:a', '96k',           // Lower bitrate for compatibility
           '-ar', '44100',           // Fixed sample rate
           '-ac', '2',               // Stereo audio
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-af', 'volume=0.5',      // Reduce volume to prevent loud audio
+          '-f', 'mp4',
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',  // Prevent timing issues
-          '-fflags', '+genpts',     // Generate presentation timestamps
+          '-shortest',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -1427,16 +1523,23 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         '-filter_complex', filterComplex,
         '-map', '[final_v]',
         '-map', '[audio_out]',
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-fflags', '+genpts',
+        '-shortest',
         // Don't use -shortest with intro to allow full extended duration
         '-y',
         absoluteOutputPath
@@ -1463,16 +1566,23 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-filter_complex', backgroundMusicConfig.audioFilter,
           '-map', '0:v',
           '-map', '[audio_out]',
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'slow',
+          '-profile:v', 'baseline',
+          '-level:v', '3.0',
+          '-crf', crfValue.toString(),
+          '-r', '25',
+          '-g', '50',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-af', 'volume=0.5',
+          '-f', 'mp4',
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
-          '-fflags', '+genpts',
+          '-shortest',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -1481,17 +1591,26 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         // Single image without background music
         ffmpegArgs = [
           '-loop', '1',
+          '-t', audioDuration.toString(),  // FIXED: Add duration parameter
           '-i', absoluteImagePaths[0],
           '-i', absoluteAudioPath,
           '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'medium',
+          '-profile:v', 'main',
+          '-level:v', '3.1',
+          '-crf', crfValue.toString(),
+          '-r', fps.toString(),
           '-c:a', 'aac',
           '-b:a', '128k',
           '-ar', '44100',
           '-ac', '2',
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-f', 'mp4',
+          '-movflags', '+faststart',
+          '-avoid_negative_ts', 'make_zero',  // FIXED: Add timing fix
+          '-fflags', '+genpts',               // FIXED: Add presentation timestamps
+          '-strict', 'experimental',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -1552,16 +1671,23 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-filter_complex', filterComplex,
           '-map', '[outv]',
           '-map', '[audio_out]',
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'slow',
+          '-profile:v', 'baseline',
+          '-level:v', '3.0',
+          '-crf', crfValue.toString(),
+          '-r', '25',
+          '-g', '50',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-af', 'volume=0.5',
+          '-f', 'mp4',
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
-          '-fflags', '+genpts',
+          '-shortest',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -1572,16 +1698,23 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
           '-filter_complex', filterComplex,
           '-map', '[outv]',
           '-map', `${absoluteImagePaths.length}:a:0`,
+          '-pix_fmt', 'yuv420p',
           '-c:v', 'libx264',
+          '-preset', 'slow',
+          '-profile:v', 'baseline',
+          '-level:v', '3.0',
+          '-crf', crfValue.toString(),
+          '-r', '25',
+          '-g', '50',
           '-c:a', 'aac',
-          '-b:a', '128k',
+          '-b:a', '96k',
           '-ar', '44100',
           '-ac', '2',
-          '-pix_fmt', 'yuv420p',
-          '-crf', crfValue.toString(),
-          '-r', fps.toString(),
+          '-af', 'volume=0.5',
+          '-f', 'mp4',
+          '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
-          '-fflags', '+genpts',
+          '-shortest',
           '-shortest',
           '-y',
           absoluteOutputPath
@@ -1725,14 +1858,23 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-i', absoluteImagePaths[0],
         '-i', absoluteAudioPath,
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,${overlayConfig.overlayFilter}`,
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
-        '-r', fps.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
+        '-avoid_negative_ts', 'make_zero',
+        '-shortest',
         '-shortest',
         '-y',
         absoluteOutputPath
@@ -1775,13 +1917,23 @@ export async function createVideoWithAffiliateOverlay(imagePaths, audioPath, out
         '-filter_complex', filterComplex,
         '-map', '[outv]',
         '-map', `${absoluteImagePaths.length}:a:0`,
+        '-pix_fmt', 'yuv420p',
         '-c:v', 'libx264',
+        '-preset', 'slow',
+        '-profile:v', 'baseline',
+        '-level:v', '3.0',
+        '-crf', crfValue.toString(),
+        '-r', '25',
+        '-g', '50',
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '96k',
         '-ar', '44100',
         '-ac', '2',
-        '-pix_fmt', 'yuv420p',
-        '-crf', crfValue.toString(),
+        '-af', 'volume=0.5',
+        '-f', 'mp4',
+        '-movflags', '+faststart',
+        '-avoid_negative_ts', 'make_zero',
+        '-shortest',
         '-shortest',
         '-y',
         absoluteOutputPath
