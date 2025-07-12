@@ -1044,7 +1044,7 @@ Options:
   --no-cleanup             Don't cleanup temporary files
   --auto-upload            Automatically upload to YouTube without confirmation
   --auto-promote           Automatically promote video on social media after upload
-  --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter)
+  --promotion-platforms    Comma-separated list of platforms (reddit,pinterest,twitter,x,tiktok)
   --create-short-video     Create a 30-second short video for social media (default: true)
   --no-short-video         Disable short video creation
   --publish-both-videos    Publish both long and short videos to YouTube (default: true)
@@ -1062,7 +1062,7 @@ Examples:
   node src/index.js "B0CPZKLJX1" --auto-upload --auto-promote
   
   # Product ID with specific platforms
-  node src/index.js "B08N5WRWNW" --promotion-platforms "reddit,twitter"
+  node src/index.js "B08N5WRWNW" --promotion-platforms "reddit,x,tiktok"
   
   # Create both full video and 30s short video for social media
   node src/index.js "B0CPZKLJX1" --create-short-video

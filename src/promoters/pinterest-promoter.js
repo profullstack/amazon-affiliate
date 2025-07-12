@@ -1,493 +1,423 @@
-import { BasePromoter } from './base-promoter.js';
-import sharp from 'sharp';
+/**
+ * Pinterest Promoter
+ * Handles Pinterest pin creation and promotion
+ */
+
+import puppeteer from 'puppeteer';
+import { PinterestLoginAutomation } from './pinterest-login-automation.js';
 import fs from 'fs/promises';
 import path from 'path';
 
-/**
- * Pinterest promoter for automated pin creation and posting
- */
-export class PinterestPromoter extends BasePromoter {
+export class PinterestPromoter {
   constructor(config = {}) {
-    super(config);
     this.name = 'pinterest';
-    this.recentPins = [];
-    this.maxPinsPerHour = 5; // Pinterest rate limit
-    this.minPinInterval = 15 * 60 * 1000; // 15 minutes between pins
-    
-    // Board mapping by category
-    this.boardMap = {
-      kitchen: ['Kitchen Gadgets', 'Cooking Tools', 'Product Reviews', 'Kitchen Organization'],
-      tech: ['Tech Gadgets', 'Electronics', 'Product Reviews', 'Cool Gadgets'],
-      home: ['Home Organization', 'Home Decor', 'Product Reviews', 'Home Improvement'],
-      fitness: ['Fitness Equipment', 'Home Gym', 'Product Reviews', 'Health & Fitness'],
-      beauty: ['Beauty Products', 'Skincare', 'Product Reviews', 'Beauty Tips'],
-      automotive: ['Car Accessories', 'Auto Products', 'Product Reviews'],
-      outdoor: ['Outdoor Gear', 'Camping', 'Product Reviews', 'Adventure'],
-      pet: ['Pet Products', 'Pet Care', 'Product Reviews', 'Pet Accessories'],
-      baby: ['Baby Products', 'Parenting', 'Product Reviews', 'Baby Gear'],
-      general: ['Product Reviews', 'Shopping', 'Cool Products', 'Must Have Items']
+    this.config = {
+      headless: config.headless ?? true,
+      timeout: config.timeout ?? 30000,
+      retries: config.retries ?? 3,
+      ...config
     };
+    this.browser = null;
+    this.page = null;
+    this.loginAutomation = null;
   }
 
   /**
-   * Generate SEO-optimized pin title
+   * Initialize browser and page
    */
-  generatePinTitle(videoTitle) {
-    // Clean up and optimize for Pinterest
-    let title = videoTitle
-      .replace(/- Honest Review$/, '')
-      .replace(/Review$/, '')
-      .trim();
-    
-    // Add Pinterest-friendly elements
-    const enhancers = [
-      '✨ Must-Have:',
-      '🔥 Trending:',
-      '💯 Worth It?',
-      '⭐ Review:',
-      '🛍️ Found:'
-    ];
-    
-    const enhancer = enhancers[Math.floor(Math.random() * enhancers.length)];
-    const finalTitle = `${enhancer} ${title}`;
-    
-    // Pinterest title limit is 100 characters
-    return finalTitle.length > 100 ? finalTitle.substring(0, 97) + '...' : finalTitle;
+  async initialize() {
+    try {
+      console.log('🚀 Initializing Pinterest promoter...');
+      
+      this.browser = await puppeteer.launch({
+        headless: this.config.headless,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu'
+        ]
+      });
+
+      this.page = await this.browser.newPage();
+      
+      // Set user agent
+      await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+      
+      // Set viewport
+      await this.page.setViewport({ width: 1366, height: 768 });
+      
+      this.loginAutomation = new PinterestLoginAutomation(this.page);
+      
+      console.log('✅ Pinterest promoter initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize Pinterest promoter:', error.message);
+      throw error;
+    }
   }
 
   /**
-   * Generate pin description with keywords and hashtags
+   * Login to Pinterest
    */
-  generatePinDescription(videoData) {
-    const { title, url, tags = [] } = videoData;
-    
-    let description = `Check out my honest review of this ${title.replace(/- Honest Review$/, '').trim()}! `;
-    description += `I tested it so you don't have to. Watch the full review to see if it's worth your money! 💰\n\n`;
-    
-    // Add call-to-action
-    description += `🎥 Watch the full review: ${url}\n\n`;
-    
-    // Add hashtags
-    const hashtags = this.generateHashtags(tags);
-    description += hashtags.join(' ');
-    
-    // Pinterest description limit is 500 characters
-    return description.length > 500 ? description.substring(0, 497) + '...' : description;
+  async login(credentials) {
+    if (!this.loginAutomation) {
+      throw new Error('Pinterest promoter not initialized');
+    }
+
+    return await this.loginAutomation.login(credentials);
   }
 
   /**
-   * Generate relevant hashtags from tags
+   * Generate Pinterest-optimized content
    */
-  generateHashtags(tags = []) {
-    const baseHashtags = ['#productreview', '#review', '#shopping', '#musthave'];
+  generateContent(productData) {
+    const { title, description, price, rating, features, affiliateUrl } = productData;
     
-    // Convert tags to hashtags
-    const tagHashtags = tags
-      .filter(tag => tag && tag.length > 2)
-      .map(tag => `#${tag.toLowerCase().replace(/[^a-z0-9]/g, '')}`)
-      .slice(0, 10);
+    // Pinterest-optimized title (100 characters max)
+    const pinTitle = this.truncateText(`${title} - ${price ? `$${price}` : 'Great Deal'}`, 100);
     
-    // Add category-specific hashtags
-    const category = this.extractProductCategory(tags);
-    const categoryHashtags = this.getCategoryHashtags(category);
-    
-    // Combine and deduplicate
-    const allHashtags = [...new Set([...baseHashtags, ...tagHashtags, ...categoryHashtags])];
-    
-    // Pinterest recommends max 20 hashtags
-    return allHashtags.slice(0, 20);
-  }
+    // Pinterest description with rich details and hashtags
+    const pinDescription = this.createPinDescription({
+      title,
+      description,
+      price,
+      rating,
+      features,
+      affiliateUrl
+    });
 
-  /**
-   * Get category-specific hashtags
-   */
-  getCategoryHashtags(category) {
-    const categoryHashtagMap = {
-      kitchen: ['#kitchen', '#cooking', '#kitchengadgets', '#cookingtools'],
-      tech: ['#tech', '#gadgets', '#electronics', '#technology'],
-      home: ['#home', '#homedecor', '#organization', '#homeimprovement'],
-      fitness: ['#fitness', '#homegym', '#workout', '#health'],
-      beauty: ['#beauty', '#skincare', '#makeup', '#beautytips'],
-      automotive: ['#car', '#auto', '#automotive', '#caraccessories'],
-      outdoor: ['#outdoor', '#camping', '#hiking', '#adventure'],
-      pet: ['#pets', '#petcare', '#petproducts', '#animals'],
-      baby: ['#baby', '#parenting', '#babyproducts', '#babygear'],
-      general: ['#products', '#shopping', '#deals', '#recommendations']
-    };
-    
-    return categoryHashtagMap[category] || categoryHashtagMap.general;
-  }
+    // Pinterest-specific hashtags
+    const hashtags = this.generateHashtags(productData);
 
-  /**
-   * Get relevant boards for posting
-   */
-  getRelevantBoards(tags = []) {
-    const category = this.extractProductCategory(tags);
-    const boards = this.boardMap[category] || this.boardMap.general;
-    
-    // Return top 2 boards to avoid spam
-    return boards.slice(0, 2);
-  }
-
-  /**
-   * Optimize image for Pinterest (1000x1500 aspect ratio)
-   */
-  optimizeImageForPin() {
     return {
-      width: 1000,
-      height: 1500,
-      quality: 90,
-      format: 'jpeg'
+      title: pinTitle,
+      description: pinDescription,
+      hashtags,
+      url: affiliateUrl
     };
   }
 
   /**
-   * Create Pinterest-optimized image from thumbnail
+   * Create Pinterest pin description
    */
-  async createPinImage(thumbnailPath, outputPath) {
-    try {
-      const settings = this.optimizeImageForPin();
-      
-      await sharp(thumbnailPath)
-        .resize(settings.width, settings.height, {
-          fit: 'cover',
-          position: 'center'
-        })
-        .jpeg({ quality: settings.quality })
-        .toFile(outputPath);
-      
-      this.logger.info(`Pin image created: ${outputPath}`);
-      return outputPath;
-    } catch (error) {
-      this.logger.error(`Failed to create pin image: ${error.message}`);
-      throw error;
+  createPinDescription({ title, description, price, rating, features, affiliateUrl }) {
+    let pinDescription = '';
+
+    // Add compelling opening
+    pinDescription += `✨ ${title}\n\n`;
+
+    // Add price if available
+    if (price) {
+      pinDescription += `💰 Price: $${price}\n`;
     }
+
+    // Add rating if available
+    if (rating) {
+      pinDescription += `⭐ Rating: ${rating}/5\n`;
+    }
+
+    pinDescription += '\n';
+
+    // Add description
+    if (description) {
+      const cleanDesc = this.cleanDescription(description);
+      pinDescription += `${cleanDesc}\n\n`;
+    }
+
+    // Add key features
+    if (features && features.length > 0) {
+      pinDescription += '🔥 Key Features:\n';
+      features.slice(0, 3).forEach(feature => {
+        pinDescription += `• ${feature}\n`;
+      });
+      pinDescription += '\n';
+    }
+
+    // Add call to action
+    pinDescription += '👆 Click the link to shop now!\n\n';
+
+    // Add hashtags
+    const hashtags = this.generateHashtags({ title, description, price, rating, features });
+    pinDescription += hashtags.join(' ');
+
+    // Pinterest has a 500 character limit for descriptions
+    return this.truncateText(pinDescription, 500);
   }
 
   /**
-   * Check Pinterest rate limiting
+   * Generate Pinterest hashtags
    */
-  checkRateLimit() {
-    const now = Date.now();
-    const oneHourAgo = now - (60 * 60 * 1000);
+  generateHashtags(productData) {
+    const { title, description } = productData;
+    const hashtags = new Set();
+
+    // Add general shopping hashtags
+    hashtags.add('#AmazonFinds');
+    hashtags.add('#Shopping');
+    hashtags.add('#Deal');
+    hashtags.add('#MustHave');
+
+    // Extract category-based hashtags from title and description
+    const text = `${title} ${description}`.toLowerCase();
     
-    // Remove old pins from tracking
-    this.recentPins = this.recentPins.filter(pinTime => pinTime > oneHourAgo);
-    
-    // Check if we're under the hourly limit
-    if (this.recentPins.length >= this.maxPinsPerHour) {
-      return false;
+    // Electronics
+    if (text.match(/\b(phone|laptop|computer|tablet|headphone|speaker|camera|tv|monitor|gaming|tech|electronic|gadget|device|wireless|bluetooth|smart|digital)\b/)) {
+      hashtags.add('#Electronics');
+      hashtags.add('#Tech');
+      hashtags.add('#Gadgets');
     }
-    
-    // Check minimum interval since last pin
-    if (this.recentPins.length > 0) {
-      const lastPin = Math.max(...this.recentPins);
-      if (now - lastPin < this.minPinInterval) {
-        return false;
-      }
+
+    // Home & Kitchen
+    if (text.match(/\b(kitchen|home|house|decor|furniture|appliance|cookware|bedding|bathroom|living|dining|bedroom|storage|organization)\b/)) {
+      hashtags.add('#HomeDecor');
+      hashtags.add('#Kitchen');
+      hashtags.add('#HomeImprovement');
     }
-    
-    return true;
+
+    // Fashion & Beauty
+    if (text.match(/\b(fashion|clothing|dress|shirt|shoes|jewelry|beauty|makeup|skincare|hair|style|outfit|accessories|bag|watch)\b/)) {
+      hashtags.add('#Fashion');
+      hashtags.add('#Style');
+      hashtags.add('#Beauty');
+    }
+
+    // Health & Fitness
+    if (text.match(/\b(fitness|health|workout|exercise|gym|yoga|supplement|vitamin|wellness|sports|running|training)\b/)) {
+      hashtags.add('#Fitness');
+      hashtags.add('#Health');
+      hashtags.add('#Wellness');
+    }
+
+    // Books & Education
+    if (text.match(/\b(book|read|education|learn|study|knowledge|guide|manual|textbook|novel|literature)\b/)) {
+      hashtags.add('#Books');
+      hashtags.add('#Reading');
+      hashtags.add('#Education');
+    }
+
+    // Toys & Games
+    if (text.match(/\b(toy|game|play|kid|child|baby|puzzle|board|card|educational|fun|entertainment)\b/)) {
+      hashtags.add('#Toys');
+      hashtags.add('#Games');
+      hashtags.add('#Kids');
+    }
+
+    // Outdoor & Sports
+    if (text.match(/\b(outdoor|camping|hiking|fishing|hunting|sports|bike|bicycle|travel|adventure|nature)\b/)) {
+      hashtags.add('#Outdoor');
+      hashtags.add('#Sports');
+      hashtags.add('#Adventure');
+    }
+
+    // Add seasonal hashtags
+    const month = new Date().getMonth();
+    if (month >= 2 && month <= 4) { // Spring
+      hashtags.add('#Spring');
+    } else if (month >= 5 && month <= 7) { // Summer
+      hashtags.add('#Summer');
+    } else if (month >= 8 && month <= 10) { // Fall
+      hashtags.add('#Fall');
+    } else { // Winter
+      hashtags.add('#Winter');
+    }
+
+    // Convert to array and limit to 20 hashtags
+    return Array.from(hashtags).slice(0, 20);
   }
 
   /**
-   * Verify Pinterest login
+   * Create a pin
    */
-  async verifyLogin() {
+  async createPin(productData, imagePath) {
     try {
-      // Check for user avatar or profile menu
-      const loginIndicators = [
-        '[data-test-id="user-avatar"]',
-        '[data-test-id="profile-avatar"]',
-        '.userAvatar',
-        '[aria-label="Profile"]'
-      ];
-      
-      for (const selector of loginIndicators) {
-        if (await this.waitForElement(selector, 3000)) {
-          this.isLoggedIn = true;
-          return true;
-        }
-      }
-      
-      return false;
-    } catch (error) {
-      this.logger.error(`Pinterest login verification failed: ${error.message}`);
-      return false;
-    }
-  }
+      console.log('📌 Creating Pinterest pin...');
 
-  /**
-   * Navigate to pin creation page
-   */
-  async navigateToCreatePin() {
-    const createUrl = 'https://www.pinterest.com/pin-creation-tool/';
-    await this.navigateTo(createUrl);
-    
-    // Wait for pin creation form
-    return await this.waitForElement('[data-test-id="pin-draft-title"]', 10000);
-  }
+      if (!this.loginAutomation) {
+        throw new Error('Pinterest promoter not initialized');
+      }
 
-  /**
-   * Upload image for pin
-   */
-  async uploadPinImage(imagePath) {
-    try {
-      // Find file input
-      const fileInput = await this.page.$('input[type="file"]');
-      if (!fileInput) {
-        throw new Error('File upload input not found');
-      }
+      // Generate Pinterest content
+      const content = this.generateContent(productData);
       
-      // Upload image
-      await fileInput.uploadFile(imagePath);
-      
-      // Wait for image to process
-      await this.randomDelay(3000, 5000);
-      
-      // Wait for image preview
-      return await this.waitForElement('[data-test-id="pin-image"]', 15000);
-    } catch (error) {
-      this.logger.error(`Failed to upload pin image: ${error.message}`);
-      throw error;
-    }
-  }
+      console.log('📝 Generated Pinterest content:');
+      console.log(`Title: ${content.title}`);
+      console.log(`Description: ${content.description.substring(0, 100)}...`);
+      console.log(`Hashtags: ${content.hashtags.slice(0, 5).join(' ')}`);
 
-  /**
-   * Fill pin details
-   */
-  async fillPinDetails(title, description, boardName) {
-    try {
-      // Fill title
-      const titleInput = '[data-test-id="pin-draft-title"]';
-      await this.typeText(titleInput, title, { clear: true });
-      
-      // Fill description
-      const descInput = '[data-test-id="pin-draft-description"]';
-      await this.typeText(descInput, description, { clear: true });
-      
-      // Select board
-      await this.selectBoard(boardName);
-      
-      return true;
-    } catch (error) {
-      this.logger.error(`Failed to fill pin details: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Select board for pin
-   */
-  async selectBoard(boardName) {
-    try {
-      // Click board selector
-      const boardSelector = '[data-test-id="board-dropdown-select-button"]';
-      await this.clickElement(boardSelector);
-      
-      // Wait for board list
-      await this.waitForElement('[data-test-id="board-row"]', 5000);
-      
-      // Look for the specific board
-      const boardOption = `[title="${boardName}"]`;
-      if (await this.waitForElement(boardOption, 3000)) {
-        await this.clickElement(boardOption);
-        return true;
-      }
-      
-      // If specific board not found, select first available board
-      const firstBoard = '[data-test-id="board-row"]:first-child';
-      await this.clickElement(firstBoard);
-      
-      return true;
-    } catch (error) {
-      this.logger.warn(`Could not select specific board, using default: ${error.message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Publish the pin
-   */
-  async publishPin() {
-    try {
-      const publishButton = '[data-test-id="pin-draft-publish-button"]';
-      await this.clickElement(publishButton);
-      
-      // Wait for success confirmation
-      await this.randomDelay(3000, 5000);
-      
-      // Check if we're redirected to the pin page
-      const currentUrl = this.page.url();
-      if (currentUrl.includes('/pin/')) {
-        return { success: true, pinUrl: currentUrl };
-      }
-      
-      // Check for error messages
-      const errorElement = await this.page.$('[data-test-id="error-message"]');
-      if (errorElement) {
-        const errorText = await errorElement.textContent();
-        throw new Error(`Pin publication failed: ${errorText}`);
-      }
-      
-      return { success: true, pinUrl: currentUrl };
-    } catch (error) {
-      this.logger.error(`Failed to publish pin: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Create a single pin
-   */
-  async createPin(imagePath, title, description, boardName) {
-    try {
-      this.logger.info(`Creating pin: ${title}`);
-      
-      // Navigate to pin creation
-      if (!await this.navigateToCreatePin()) {
-        throw new Error('Failed to load pin creation page');
-      }
-      
-      // Upload image
-      if (!await this.uploadPinImage(imagePath)) {
-        throw new Error('Failed to upload pin image');
-      }
-      
-      // Fill pin details
-      await this.fillPinDetails(title, description, boardName);
-      
-      // Publish pin
-      const result = await this.publishPin();
+      // Create the pin using automation
+      const result = await this.loginAutomation.createPin(content, imagePath);
       
       if (result.success) {
-        this.recentPins.push(Date.now());
-        this.logger.info(`Pin created successfully: ${result.pinUrl}`);
+        console.log('✅ Pinterest pin created successfully');
+        return {
+          success: true,
+          platform: 'Pinterest',
+          pinUrl: result.pinUrl,
+          content: content
+        };
+      } else {
+        throw new Error('Failed to create Pinterest pin');
       }
-      
-      return result;
+
     } catch (error) {
-      this.logger.error(`Failed to create pin: ${error.message}`);
-      await this.takeScreenshot(`pinterest-error-${Date.now()}`);
+      console.error('❌ Failed to create Pinterest pin:', error.message);
       throw error;
     }
   }
 
   /**
-   * Main promotion method
+   * Main promotion method (required by PromotionManager)
    */
   async promote(videoData) {
     try {
-      this.validateVideoData(videoData);
+      console.log('📌 Starting Pinterest promotion...');
       
-      const { title, thumbnailPath, tags = [] } = videoData;
+      // Convert videoData to productData format
+      const productData = {
+        title: videoData.title,
+        description: videoData.description || '',
+        price: videoData.price || null,
+        rating: videoData.rating || null,
+        features: videoData.features || [],
+        affiliateUrl: videoData.url || videoData.affiliateUrl,
+        tags: videoData.tags || []
+      };
+
+      // Use thumbnail as image (you would typically have a product image)
+      const imagePath = videoData.thumbnailPath || './test-assets/sample-product-image.jpg';
       
-      if (!thumbnailPath) {
-        throw new Error('Pinterest promotion requires a thumbnail image');
-      }
-      
-      // Check if thumbnail exists
-      try {
-        await fs.access(thumbnailPath);
-      } catch {
-        throw new Error(`Thumbnail file not found: ${thumbnailPath}`);
-      }
-      
-      this.logger.info(`Starting Pinterest promotion for: ${title}`);
-      
-      // Check rate limits
-      if (!this.checkRateLimit()) {
-        throw new Error('Pinterest rate limit exceeded. Please wait before creating more pins.');
-      }
-      
-      // Initialize browser
-      await this.init();
-      
-      // Navigate to Pinterest and handle login
-      await this.navigateTo('https://www.pinterest.com');
-      
-      if (!await this.verifyLogin()) {
-        this.logger.info('User login required for Pinterest');
-        await this.promptUserLogin('Pinterest');
-        
-        if (!await this.verifyLogin()) {
-          throw new Error('Pinterest login verification failed');
-        }
-      }
-      
-      // Create Pinterest-optimized image
-      const tempDir = './temp';
-      await fs.mkdir(tempDir, { recursive: true });
-      
-      const pinImagePath = path.join(tempDir, `pin-${Date.now()}.jpg`);
-      await this.createPinImage(thumbnailPath, pinImagePath);
-      
-      // Generate pin content
-      const pinTitle = this.generatePinTitle(title);
-      const pinDescription = this.generatePinDescription(videoData);
-      const relevantBoards = this.getRelevantBoards(tags);
-      
-      const results = [];
-      
-      // Create pins for each relevant board
-      for (const boardName of relevantBoards) {
-        try {
-          if (!this.checkRateLimit()) {
-            this.logger.warn('Rate limit reached, stopping pin creation');
-            break;
-          }
-          
-          const result = await this.createPin(pinImagePath, pinTitle, pinDescription, boardName);
-          results.push({
-            board: boardName,
-            success: true,
-            pinUrl: result.pinUrl
-          });
-          
-          // Wait between pins
-          await this.randomDelay(60000, 120000); // 1-2 minutes
-          
-        } catch (error) {
-          this.logger.error(`Failed to create pin for board ${boardName}: ${error.message}`);
-          results.push({
-            board: boardName,
-            success: false,
-            error: error.message
-          });
-        }
-      }
-      
-      // Cleanup temp image
-      try {
-        await fs.unlink(pinImagePath);
-      } catch (error) {
-        this.logger.warn(`Failed to cleanup temp image: ${error.message}`);
-      }
-      
-      await this.cleanup();
-      
-      const successfulPins = results.filter(r => r.success);
+      // Mock credentials for testing (in real use, these would come from config)
+      const credentials = {
+        email: 'test@example.com',
+        password: 'testpassword'
+      };
+
+      const result = await this.post(productData, imagePath, credentials);
       
       return {
-        success: successfulPins.length > 0,
+        success: result.success,
         platform: 'pinterest',
-        pins: results,
-        summary: {
-          total: results.length,
-          successful: successfulPins.length,
-          failed: results.length - successfulPins.length
-        }
+        postUrl: result.pinUrl,
+        content: result.content,
+        error: result.error
       };
-      
+
     } catch (error) {
-      this.logger.error(`Pinterest promotion failed: ${error.message}`);
-      await this.cleanup();
-      
+      console.error('❌ Pinterest promotion failed:', error.message);
       return {
         success: false,
         platform: 'pinterest',
         error: error.message
       };
+    }
+  }
+
+  /**
+   * Post to Pinterest with retry logic
+   */
+  async post(productData, imagePath, credentials) {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= this.config.retries; attempt++) {
+      try {
+        console.log(`📌 Pinterest posting attempt ${attempt}/${this.config.retries}`);
+        
+        if (!this.browser) {
+          await this.initialize();
+        }
+
+        // Login if not already logged in
+        const loginResult = await this.login(credentials);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+
+        // Create pin
+        const result = await this.createPin(productData, imagePath);
+        
+        console.log('✅ Pinterest posting successful');
+        return result;
+
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ Pinterest posting attempt ${attempt} failed:`, error.message);
+        
+        if (attempt < this.config.retries) {
+          console.log(`⏳ Retrying in ${attempt * 2} seconds...`);
+          await this.delay(attempt * 2000);
+          
+          // Reinitialize browser for next attempt
+          await this.cleanup();
+          await this.initialize();
+        }
+      }
+    }
+
+    throw new Error(`Pinterest posting failed after ${this.config.retries} attempts: ${lastError.message}`);
+  }
+
+  /**
+   * Clean description text
+   */
+  cleanDescription(description) {
+    return description
+      .replace(/[^\w\s.,!?-]/g, '') // Remove special characters except basic punctuation
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+  }
+
+  /**
+   * Truncate text to specified length
+   */
+  truncateText(text, maxLength) {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength - 3) + '...';
+  }
+
+  /**
+   * Delay execution
+   */
+  async delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Take screenshot for debugging
+   */
+  async takeScreenshot(filename = 'pinterest-debug.png') {
+    if (this.page) {
+      try {
+        await this.page.screenshot({ 
+          path: filename, 
+          fullPage: true 
+        });
+        console.log(`📸 Screenshot saved: ${filename}`);
+      } catch (error) {
+        console.warn('Failed to take screenshot:', error.message);
+      }
+    }
+  }
+
+  /**
+   * Cleanup resources
+   */
+  async cleanup() {
+    try {
+      if (this.page) {
+        await this.page.close();
+        this.page = null;
+      }
+      if (this.browser) {
+        await this.browser.close();
+        this.browser = null;
+      }
+      this.loginAutomation = null;
+      console.log('🧹 Pinterest promoter cleaned up');
+    } catch (error) {
+      console.warn('Cleanup warning:', error.message);
     }
   }
 }

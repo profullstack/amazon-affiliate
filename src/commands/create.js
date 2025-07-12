@@ -57,7 +57,7 @@ const FLAG_DEFINITIONS = {
   },
   'promotion-platforms': {
     type: 'array',
-    default: ['reddit', 'pinterest', 'twitter'],
+    default: ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'],
     description: 'Comma-separated list of promotion platforms'
   },
   'create-short-video': {
@@ -120,7 +120,7 @@ Options:
   --no-cleanup               Don't cleanup temporary files
   --auto-upload              Automatically upload to YouTube without confirmation
   --auto-promote             Automatically promote video on social media after upload
-  --promotion-platforms <list> Comma-separated platforms (reddit,pinterest,twitter)
+  --promotion-platforms <list> Comma-separated platforms (reddit,pinterest,twitter,x,tiktok)
   --create-short-video       Create a 30-second short video for social media (default: true)
   --no-short-video           Disable short video creation
   --publish-both-videos      Publish both long and short videos to YouTube (default: true)
@@ -137,7 +137,7 @@ Examples:
   aff create "https://www.amazon.com/dp/B08N5WRWNW" --auto-upload
 
   # Create with auto-promotion on specific platforms
-  aff create B0CPZKLJX1 --auto-upload --auto-promote --promotion-platforms "reddit,twitter"
+  aff create B0CPZKLJX1 --auto-upload --auto-promote --promotion-platforms "reddit,x,tiktok"
 
   # Create only full video (no short video)
   aff create B08N5WRWNW --no-short-video

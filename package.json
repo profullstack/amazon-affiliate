@@ -44,6 +44,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@profullstack/social-poster": "^1.1.0",
     "cheerio": "^1.1.0",
     "dotenv": "^16.3.1",
     "fluent-ffmpeg": "^2.1.2",

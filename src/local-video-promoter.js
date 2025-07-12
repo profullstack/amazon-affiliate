@@ -272,8 +272,8 @@ class LocalVideoPromoter {
     const tagsInput = await prompt('Tags (comma-separated, optional)', 'review,product,amazon');
     const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()) : [];
 
-    const platformsInput = await prompt('Platforms (comma-separated)', 'reddit,pinterest,twitter');
-    const platforms = platformsInput ? platformsInput.split(',').map(p => p.trim()) : ['reddit', 'pinterest', 'twitter'];
+    const platformsInput = await prompt('Platforms (comma-separated)', 'reddit,pinterest,twitter,x,tiktok');
+    const platforms = platformsInput ? platformsInput.split(',').map(p => p.trim()) : ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'];
 
     return {
       title,
@@ -438,7 +438,7 @@ class LocalVideoPromoter {
         url: youtubeUrl,
         description: options.description, // Use provided description or let platform-specific logic handle it
         tags: options.tags || ['review', 'product', 'amazon'],
-        platforms: options.platforms || ['reddit', 'pinterest', 'twitter'],
+        platforms: options.platforms || ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'],
         thumbnailPath: video.thumbnailPath,
         video // Pass video object for platform-specific descriptions
       };
@@ -516,7 +516,7 @@ Examples:
   node src/local-video-promoter.js "kitchen-gadget-123456.mp4" "https://youtube.com/watch?v=abc123" \\
     --title "Amazing Kitchen Gadget Review" \\
     --tags "kitchen,gadget,review" \\
-    --platforms "reddit,twitter"
+    --platforms "reddit,x,tiktok"
     `);
   }
 }

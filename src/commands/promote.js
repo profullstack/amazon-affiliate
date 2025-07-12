@@ -39,7 +39,7 @@ const FLAG_DEFINITIONS = {
   },
   'platforms': {
     type: 'array',
-    default: ['reddit', 'pinterest', 'twitter'],
+    default: ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'],
     description: 'Comma-separated platforms to promote on'
   },
   'headless': {
@@ -57,7 +57,7 @@ const FLAG_DEFINITIONS = {
 /**
  * Available promotion platforms
  */
-const AVAILABLE_PLATFORMS = ['reddit', 'pinterest', 'twitter'];
+const AVAILABLE_PLATFORMS = ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'];
 
 /**
  * Display help information for the promote command
@@ -76,7 +76,7 @@ Options:
   --description <desc>        Video description
   --tags <tags>               Comma-separated tags (e.g., "kitchen,gadget,review")
   --thumbnail <path>          Path to thumbnail image (required for Pinterest)
-  --platforms <list>          Comma-separated platforms (default: reddit,pinterest,twitter)
+  --platforms <list>          Comma-separated platforms (default: reddit,pinterest,twitter,x,tiktok)
   --headless <bool>           Run in headless mode (default: true)
   --auto-confirm             Skip confirmation prompts
 
@@ -96,7 +96,7 @@ Examples:
   # Promote to specific platforms only
   aff promote "https://youtube.com/watch?v=abc123" \\
     --title "Product Review" \\
-    --platforms "reddit,twitter"
+    --platforms "reddit,x,tiktok"
 
   # Promote with interactive prompts
   aff promote "https://youtube.com/watch?v=abc123"

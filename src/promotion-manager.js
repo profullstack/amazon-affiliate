@@ -1,6 +1,8 @@
 import { RedditPromoter } from './promoters/reddit-promoter.js';
 import { PinterestPromoter } from './promoters/pinterest-promoter.js';
 import { TwitterPromoter } from './promoters/twitter-promoter.js';
+import { XPromoter } from './promoters/x-promoter.js';
+import { TikTokPromoter } from './promoters/tiktok-promoter.js';
 import winston from 'winston';
 import fs from 'fs/promises';
 
@@ -12,7 +14,7 @@ export class PromotionManager {
     this.config = {
       headless: false, // Show browser windows by default for easier login
       timeout: 30000,
-      enabledPlatforms: ['reddit', 'pinterest', 'twitter'],
+      enabledPlatforms: ['reddit', 'pinterest', 'twitter', 'x', 'tiktok'],
       maxConcurrentPromotions: 1, // Run promotions sequentially to avoid detection
       ...config
     };
@@ -63,6 +65,15 @@ export class PromotionManager {
 
     if (this.config.enabledPlatforms.includes('twitter')) {
       this.addPromoter(new TwitterPromoter(promoterConfig));
+    }
+
+    // New platforms with dedicated promoters
+    if (this.config.enabledPlatforms.includes('x')) {
+      this.addPromoter(new XPromoter(promoterConfig));
+    }
+
+    if (this.config.enabledPlatforms.includes('tiktok')) {
+      this.addPromoter(new TikTokPromoter(promoterConfig));
     }
   }
 
@@ -369,7 +380,9 @@ export class PromotionManager {
         const platformUrls = {
           reddit: 'https://www.reddit.com',
           pinterest: 'https://www.pinterest.com',
-          twitter: 'https://twitter.com'
+          twitter: 'https://twitter.com',
+          x: 'https://x.com',
+          tiktok: 'https://www.tiktok.com'
         };
         
         const url = platformUrls[promoter.name];
