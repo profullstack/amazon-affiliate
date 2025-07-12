@@ -209,8 +209,8 @@ const convertToVideoOptions = (cliOptions, productInput) => {
     publishBothVideos: cliOptions['publish-both-videos'],
     headless: cliOptions.headless,
     voiceGender: voiceGender,
-    // FIXED: Disable problematic features that cause buzzing noise and introEnd errors
-    enableBackgroundMusic: false, // Disable background music to prevent buzzing noise
+    // FIXED: Re-enable background music with proper audio level controls
+    enableBackgroundMusic: true, // Re-enable background music with fixed audio levels
     enableIntroOutro: true, // Re-enable outro for QR code feature
     enableIntro: false, // Keep intro disabled to prevent introEnd variable errors
     // FIXED: Pass Amazon URL to enable QR code outro functionality

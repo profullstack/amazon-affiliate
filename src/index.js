@@ -423,11 +423,13 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
 
     let finalVideoPath;
     
+    // Generate affiliate URL for use in video creation and QR codes
+    const affiliateTag = process.env.AFFILIATE_TAG;
+    const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
+    
     // Use affiliate overlay video creation if enabled
     if (config.enableAffiliateOverlay) {
       console.log('🎯 Creating video with affiliate overlay...');
-      const affiliateTag = process.env.AFFILIATE_TAG;
-      const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
       
       const productDataForOverlay = {
         affiliateUrl,
@@ -616,7 +618,6 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     });
     
     // Build complete description with affiliate link
-    const affiliateTag = process.env.AFFILIATE_TAG;
     const videoDescription = buildCompleteDescription(baseVideoDescription, productUrl, affiliateTag);
     
     timings.descriptionGeneration.end = Date.now();
@@ -807,11 +808,10 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         
         try {
           console.log('\n🎯 Setting up YouTube interactive elements...');
-          const affiliateTag = process.env.AFFILIATE_TAG;
-          const affiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
+          const interactiveAffiliateUrl = generateAffiliateUrl(productUrl, affiliateTag);
           
           const productDataForInteractive = {
-            affiliateUrl,
+            affiliateUrl: interactiveAffiliateUrl,
             title: productData.title,
             price: productData.price || 'Check Amazon for current price'
           };

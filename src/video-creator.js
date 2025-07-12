@@ -77,8 +77,8 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
   const audioFilter = [
     // Background music processing: loop, fade in/out, volume control
     `[1:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${safeFadeIn},afade=t=out:st=${fadeOutStart}:d=${safeFadeOut},volume=${safeBackgroundVolume}[bg];`,
-    // Voiceover processing: ensure consistent volume with 50% reduction for safety
-    `[0:a]volume=${safeVoiceVolume * 0.5}[voice];`,
+    // Voiceover processing: ensure consistent volume with 80% for better audio levels
+    `[0:a]volume=${safeVoiceVolume * 0.8}[voice];`,
     // Mix both audio streams
     `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out]`
   ].join('');
@@ -317,7 +317,10 @@ export const createIntroOutroFilter = (config) => {
 
   // Audio processing: intro voiceover + main voiceover + outro voiceover + background music
   // mainVoiceoverIndex is now passed as a parameter
-  const musicIndex = (outroVoiceoverIndex !== null ? outroVoiceoverIndex : mainVoiceoverIndex) + 1; // Background music (after last voiceover)
+  // Calculate music index: it should be the last input (after outro image if present)
+  let musicIndex = mainVoiceoverIndex + 1; // Start after main voiceover
+  if (outroVoiceoverIndex !== null) musicIndex = outroVoiceoverIndex + 1; // After outro voiceover if present
+  if (outroConfig && outroConfig.enabled) musicIndex++; // After outro image if present
   
   // Calculate timing variables that are used in both branches
   const introEnd = introConfig.enabled ? introConfig.duration : 0;
@@ -373,23 +376,26 @@ export const createIntroOutroFilter = (config) => {
     // Handle multiple voiceovers with proper timing
     let voiceFilters = [];
     
+    // Use consistent normalized volume for all voiceovers - increased for better audio levels
+    const safeVoiceVolume = normalizeVolume(0.8, 'voice'); // Increased from 0.5 to 0.8 (80%)
+    
     if (introVoiceoverIndex !== null && introConfig.enabled) {
       // Intro voiceover: trim to intro duration and play from start
-      filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
+      filterComplex += `[${introVoiceoverIndex}:a]volume=${safeVoiceVolume},atrim=0:${introEnd}[intro_voice];`;
       voiceFilters.push('[intro_voice]');
     }
     
     if (mainVoiceoverIndex !== null) {
       // Main voiceover: delay by intro duration so it starts after intro ends
       const mainDelay = introEnd * 1000;
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=${safeVoiceVolume},adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
       voiceFilters.push('[delayed_main_voice]');
     }
     
     if (outroVoiceoverIndex !== null && outroConfig && outroConfig.enabled) {
       // Outro voiceover: delay by intro + main duration so it starts after main ends
       const outroDelay = outroStart * 1000;
-      filterComplex += `[${outroVoiceoverIndex}:a]volume=0.5,adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
+      filterComplex += `[${outroVoiceoverIndex}:a]volume=${safeVoiceVolume},adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
       voiceFilters.push('[delayed_outro_voice]');
     }
     
@@ -408,23 +414,26 @@ export const createIntroOutroFilter = (config) => {
     // No background music - handle voiceovers only
     let voiceFilters = [];
     
+    // Use consistent normalized volume for all voiceovers - increased for better audio levels
+    const safeVoiceVolume = normalizeVolume(0.8, 'voice'); // Increased from 0.5 to 0.8 (80%)
+    
     if (introVoiceoverIndex !== null && introConfig.enabled) {
       // Intro voiceover: trim to intro duration and play from start
-      filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
+      filterComplex += `[${introVoiceoverIndex}:a]volume=${safeVoiceVolume},atrim=0:${introEnd}[intro_voice];`;
       voiceFilters.push('[intro_voice]');
     }
     
     if (mainVoiceoverIndex !== null) {
       // Main voiceover: delay by intro duration so it starts after intro ends
       const mainDelay = introEnd * 1000;
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=${safeVoiceVolume},adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
       voiceFilters.push('[delayed_main_voice]');
     }
     
     if (outroVoiceoverIndex !== null && outroConfig && outroConfig.enabled) {
       // Outro voiceover: delay by intro + main duration so it starts after main ends
       const outroDelay = outroStart * 1000;
-      filterComplex += `[${outroVoiceoverIndex}:a]volume=0.5,adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
+      filterComplex += `[${outroVoiceoverIndex}:a]volume=${safeVoiceVolume},adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
       voiceFilters.push('[delayed_outro_voice]');
     }
     
@@ -1281,7 +1290,7 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
         // Update the filter complex to include background music mixing with volume control
-        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.5}[voice];`;
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.8}[voice];`;
         filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
         filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
         
