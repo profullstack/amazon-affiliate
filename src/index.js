@@ -370,6 +370,13 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
       config.voiceGender
     );
     
+    // Store the selected voice ID for consistency across all voiceovers
+    if (!config.selectedVoiceId) {
+      const { getRandomVoice } = await import('./voiceover-generator.js');
+      config.selectedVoiceId = getRandomVoice();
+      console.log(`🎤 Voice selected for consistency: ${config.selectedVoiceId}`);
+    }
+    
     timings.voiceoverGeneration.end = Date.now();
     tempFiles.push(voiceoverPath);
     console.log(`✅ Voiceover generated: ${voiceoverPath}`);
@@ -446,6 +453,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         }
       );
     } else {
+      console.log(`🎬 Creating slideshow with QR code outro options:`);
+      console.log(`   enableIntroOutro: ${config.enableIntroOutro}`);
+      console.log(`   amazonUrl: ${affiliateUrl}`);
+      console.log(`   introOutroOptions:`, JSON.stringify(config.introOutroOptions || {}, null, 2));
+      
       finalVideoPath = await createSlideshow(
         imagePaths,
         voiceoverPath,
@@ -454,7 +466,10 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           ...videoOptions,
           enableBackgroundMusic: config.enableBackgroundMusic,
           enableIntroOutro: config.enableIntroOutro,
-          introOutroOptions: config.introOutroOptions || {}
+          introOutroOptions: config.introOutroOptions || {},
+          amazonUrl: affiliateUrl, // Pass Amazon URL for QR code generation
+          selectedVoiceId: config.selectedVoiceId, // Pass voice ID for consistency
+          voiceGender: config.voiceGender // Pass voice gender for consistency
         }
       );
     }
@@ -484,7 +499,8 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
           shortVideoScript,
           voiceoverPaths.paths.short,
           undefined, // Use default voice settings
-          config.voiceGender
+          config.voiceGender,
+          config.selectedVoiceId // Use the same voice as main video
         );
         tempFiles.push(shortVoiceoverPath);
         console.log(`✅ Short video voiceover generated: ${shortVoiceoverPath}`);
@@ -507,6 +523,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         // Use the same images for both videos (the original downloaded images)
         console.log(`📱 Using original images for short video (same as main video)`);
         
+        console.log(`📱 Creating short video with QR code outro options:`);
+        console.log(`   enableIntroOutro: ${config.enableIntroOutro}`);
+        console.log(`   amazonUrl: ${affiliateUrl}`);
+        console.log(`   introOutroOptions:`, JSON.stringify(config.introOutroOptions || {}, null, 2));
+        
         shortVideoPath = await createShortVideo(
           imagePaths,
           shortVoiceoverPath,
@@ -515,7 +536,10 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
             ...shortVideoOptions,
             enableBackgroundMusic: config.enableBackgroundMusic,
             enableIntroOutro: config.enableIntroOutro,
-            introOutroOptions: config.introOutroOptions || {}
+            introOutroOptions: config.introOutroOptions || {},
+            amazonUrl: affiliateUrl, // Pass Amazon URL for QR code generation
+            selectedVoiceId: config.selectedVoiceId, // Pass voice ID for consistency
+            voiceGender: config.voiceGender // Pass voice gender for consistency
           }
         );
         

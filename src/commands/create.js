@@ -187,7 +187,7 @@ const validateCreateArgs = (args, options) => {
  * @param {Object} cliOptions - CLI options
  * @returns {Object} - Options for createAffiliateVideo function
  */
-const convertToVideoOptions = (cliOptions) => {
+const convertToVideoOptions = (cliOptions, productInput) => {
   // Determine voice gender preference
   let voiceGender = null;
   if (cliOptions.male) {
@@ -209,6 +209,16 @@ const convertToVideoOptions = (cliOptions) => {
     publishBothVideos: cliOptions['publish-both-videos'],
     headless: cliOptions.headless,
     voiceGender: voiceGender,
+    // FIXED: Disable problematic features that cause buzzing noise and introEnd errors
+    enableBackgroundMusic: false, // Disable background music to prevent buzzing noise
+    enableIntroOutro: true, // Re-enable outro for QR code feature
+    enableIntro: false, // Keep intro disabled to prevent introEnd variable errors
+    // FIXED: Pass Amazon URL to enable QR code outro functionality
+    amazonUrl: productInput, // Pass the product input (URL or ID) for QR code generation
+    introOutroOptions: {
+      enableQROutro: true, // Explicitly enable QR code outro
+      outroDuration: 10.0  // 10-second QR code outro
+    },
     onProgress: createProgressCallback()
   };
 };
@@ -338,7 +348,7 @@ const createCommand = async (args) => {
     }
 
     // Convert CLI options to video creation options
-    const videoOptions = convertToVideoOptions(options);
+    const videoOptions = convertToVideoOptions(options, productInput);
     
     // Create the video
     const result = await createAffiliateVideo(productInput, videoOptions);

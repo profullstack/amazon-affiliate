@@ -105,17 +105,22 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
 };
 
 /**
- * Creates intro segment for professional video branding (outro removed per user request)
+ * Creates intro segment for professional video branding and QR code outro
  * @param {string} backgroundMusicPath - Path to background music file
- * @param {Object} options - Intro options
- * @returns {Object} Intro configuration
+ * @param {Object} options - Intro/outro options
+ * @returns {Object} Intro/outro configuration
  */
 const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
   const {
     introDuration = 5.0,        // 5 second intro
     introVolume = 0.4,          // FIXED: 40% volume for intro music (was 100% - too loud!)
     introImagePath = './src/media/banner.jpg',
-    introVoiceoverText = 'Welcome to The Professional Prompt where we review your favorite products'
+    introVoiceoverText = 'Welcome to The Professional Prompt where we review your favorite products',
+    // QR code outro options
+    enableQROutro = false,      // Enable QR code outro
+    outroDuration = 10.0,       // 10 second outro for QR code
+    amazonUrl = null,           // Amazon affiliate URL for QR code
+    qrCodePath = null           // Path to generated QR code image
   } = options;
 
   // Normalize intro volume to prevent loud noise
@@ -132,7 +137,52 @@ const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
     console.log(`⚠️ Intro image not found: ${introImagePath}`);
   }
 
-  return {
+  // Check if QR code outro should be enabled
+  let outroEnabled = false;
+  let qrCodeImagePath = null;
+  
+  console.log(`🔍 QR code outro check: enableQROutro=${enableQROutro}, amazonUrl=${amazonUrl ? 'provided' : 'missing'}`);
+  
+  if (enableQROutro && amazonUrl) {
+    try {
+      console.log(`🔗 Attempting to generate QR code for: ${amazonUrl}`);
+      
+      // Import QR code generator
+      const { generateQRCode } = await import('./utils/qr-code-generator.js');
+      
+      // Generate QR code if not provided
+      if (!qrCodePath) {
+        const tempDir = './temp';
+        await fs.mkdir(tempDir, { recursive: true });
+        qrCodeImagePath = path.resolve(`${tempDir}/qr-code-${Date.now()}.png`);
+        console.log(`📁 Generating QR code to: ${qrCodeImagePath}`);
+        await generateQRCode(amazonUrl, qrCodeImagePath);
+        console.log(`✅ QR code generated successfully`);
+      } else {
+        qrCodeImagePath = path.resolve(qrCodePath);
+        console.log(`📁 Using provided QR code path: ${qrCodeImagePath}`);
+      }
+      
+      outroEnabled = await checkFileExists(qrCodeImagePath);
+      if (outroEnabled) {
+        console.log(`✅ QR code outro enabled with image: ${qrCodeImagePath}`);
+      } else {
+        console.log(`❌ QR code file does not exist: ${qrCodeImagePath}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to generate QR code outro: ${error.message}`);
+      console.error(`🔍 QR code error details:`, error);
+      outroEnabled = false;
+    }
+  } else {
+    console.log(`❌ QR code outro not enabled: enableQROutro=${enableQROutro}, amazonUrl=${amazonUrl ? 'provided' : 'missing'}`);
+  }
+
+  const totalExtraDuration = (introExists ? introDuration : 0) + (outroEnabled ? outroDuration : 0);
+
+  console.log(`🎭 Intro/Outro configuration: intro=${introExists}, outro=${outroEnabled}, totalExtra=${totalExtraDuration}s`);
+
+  const config = {
     intro: {
       enabled: introExists,
       imagePath: introImagePath,
@@ -141,13 +191,18 @@ const createIntroOutroSegments = async (backgroundMusicPath, options = {}) => {
       voiceoverText: introVoiceoverText
     },
     outro: {
-      enabled: false,  // Outro completely removed per user request
-      imagePath: null,
-      duration: 0,
-      volume: 0
+      enabled: outroEnabled,
+      imagePath: qrCodeImagePath,
+      duration: outroDuration,
+      volume: 0.3,  // Moderate volume for outro
+      voiceoverText: 'Scan the QR code or on mobile take a screenshot and scan it to go to the product page'
     },
-    totalExtraDuration: introExists ? introDuration : 0  // Only intro duration now
+    totalExtraDuration: totalExtraDuration
   };
+
+  console.log(`🎬 Final intro/outro config:`, JSON.stringify(config, null, 2));
+  
+  return config;
 };
 
 /**
@@ -165,19 +220,21 @@ const checkFileExists = async (filePath) => {
 };
 
 /**
- * Creates complex FFmpeg filter for intro and main content (outro removed per user request)
+ * Creates complex FFmpeg filter for intro, main content, and QR code outro
  * @param {Object} config - Configuration object
  * @returns {string} FFmpeg filter complex string
  */
 export const createIntroOutroFilter = (config) => {
   const {
     introConfig,
+    outroConfig,
     mainContentConfig,
     backgroundMusicPath,
     totalDuration,
     resolution,
     introVoiceoverIndex = null,  // New parameter for intro voiceover audio
-    mainVoiceoverIndex = null    // New parameter for main voiceover audio
+    mainVoiceoverIndex = null,   // New parameter for main voiceover audio
+    outroVoiceoverIndex = null   // New parameter for outro voiceover audio
   } = config;
 
   const [width, height] = resolution.split('x').map(Number);
@@ -228,7 +285,26 @@ export const createIntroOutroFilter = (config) => {
     segmentFilters.push('[main_v]');
   }
 
-  // Concatenate video segments (intro + main content only, no outro)
+  // Outro segment with QR code
+  if (outroConfig && outroConfig.enabled) {
+    // Calculate the correct outro input index
+    // Input order: intro image (0) + main images (1 to N) + intro voiceover + main voiceover + outro voiceover + outro image
+    let outroInputIndex = mainContentStart + mainContentConfig.imageCount; // After main images
+    
+    // Skip voiceover inputs to get to the outro image
+    if (introVoiceoverIndex !== null) outroInputIndex++; // Skip intro voiceover
+    if (mainVoiceoverIndex !== null) outroInputIndex++; // Skip main voiceover
+    if (outroVoiceoverIndex !== null) outroInputIndex++; // Skip outro voiceover
+    
+    console.log(`🎬 Outro image input index: ${outroInputIndex}`);
+    
+    // Create QR code outro without text overlay to prevent overlap
+    filterComplex += `[${outroInputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,`;
+    filterComplex += `setsar=1:1,setpts=PTS-STARTPTS[outro_v];`;
+    segmentFilters.push('[outro_v]');
+  }
+
+  // Concatenate video segments (intro + main content + outro)
   if (segmentFilters.length > 1) {
     filterComplex += `${segmentFilters.join('')}concat=n=${segmentFilters.length}:v=1:a=0[final_v];`;
   } else if (segmentFilters.length === 1) {
@@ -239,14 +315,18 @@ export const createIntroOutroFilter = (config) => {
     throw new Error('No video segments available for concatenation');
   }
 
-  // Audio processing: intro voiceover + main voiceover + background music
+  // Audio processing: intro voiceover + main voiceover + outro voiceover + background music
   // mainVoiceoverIndex is now passed as a parameter
-  const musicIndex = mainVoiceoverIndex + 1; // Background music (after main voiceover)
+  const musicIndex = (outroVoiceoverIndex !== null ? outroVoiceoverIndex : mainVoiceoverIndex) + 1; // Background music (after last voiceover)
+  
+  // Calculate timing variables that are used in both branches
+  const introEnd = introConfig.enabled ? introConfig.duration : 0;
+  const mainEnd = introEnd + mainContentConfig.duration;
+  const outroStart = mainEnd;
+  const outroEnd = outroConfig && outroConfig.enabled ? outroStart + outroConfig.duration : mainEnd;
   
   if (backgroundMusicPath) {
     // Create volume-varying background music with dynamic intro volume control
-    const introEnd = introConfig.enabled ? introConfig.duration : 0;
-    const mainEnd = introEnd + mainContentConfig.duration;
 
     let musicFilter = `[${musicIndex}:a]aloop=loop=-1:size=2e+09`;
     
@@ -276,6 +356,13 @@ export const createIntroOutroFilter = (config) => {
     musicFilter += `,volume=enable='between(t,${introEnd},${mainEnd})':volume=${safeBackgroundVolume}`;
     console.log(`🎵 Main content background volume: ${(safeBackgroundVolume*100).toFixed(0)}%`);
     
+    // Lower volume during outro with normalization
+    if (outroConfig && outroConfig.enabled) {
+      const safeOutroVolume = normalizeVolume(0.2, 'background'); // 20% during outro
+      musicFilter += `,volume=enable='between(t,${outroStart},${outroEnd})':volume=${safeOutroVolume}`;
+      console.log(`🎵 Outro background volume: ${(safeOutroVolume*100).toFixed(0)}%`);
+    }
+    
     // Add fade in/out with validated durations
     const safeFadeIn = validateFadeDuration(2.0);
     const safeFadeOut = validateFadeDuration(2.0);
@@ -283,42 +370,72 @@ export const createIntroOutroFilter = (config) => {
     
     filterComplex += musicFilter;
 
+    // Handle multiple voiceovers with proper timing
+    let voiceFilters = [];
+    
     if (introVoiceoverIndex !== null && introConfig.enabled) {
-      // FIXED: Use correct audio inputs - intro voiceover and main voiceover are separate files
-      // Intro voiceover: trim to intro duration and play from start with volume control
+      // Intro voiceover: trim to intro duration and play from start
       filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
-      // Main voiceover: delay by intro duration so it starts after intro ends with volume control
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
-      // Combine intro and delayed main voiceover (they won't overlap due to delay)
-      filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[combined_voice];`;
-      // Mix combined voice with background music
+      voiceFilters.push('[intro_voice]');
+    }
+    
+    if (mainVoiceoverIndex !== null) {
+      // Main voiceover: delay by intro duration so it starts after intro ends
+      const mainDelay = introEnd * 1000;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
+      voiceFilters.push('[delayed_main_voice]');
+    }
+    
+    if (outroVoiceoverIndex !== null && outroConfig && outroConfig.enabled) {
+      // Outro voiceover: delay by intro + main duration so it starts after main ends
+      const outroDelay = outroStart * 1000;
+      filterComplex += `[${outroVoiceoverIndex}:a]volume=0.5,adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
+      voiceFilters.push('[delayed_outro_voice]');
+    }
+    
+    // Combine all voiceovers
+    if (voiceFilters.length > 1) {
+      filterComplex += `${voiceFilters.join('')}amix=inputs=${voiceFilters.length}:duration=longest:dropout_transition=0[combined_voice];`;
       filterComplex += `[combined_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
-    } else if (introConfig.enabled) {
-      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro with volume control
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_voice];`;
-      filterComplex += `[delayed_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+    } else if (voiceFilters.length === 1) {
+      filterComplex += `${voiceFilters[0]}[combined_voice];`;
+      filterComplex += `[combined_voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
     } else {
-      // No intro - main voiceover starts immediately with volume control
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5[voice];`;
-      filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
+      // No voiceovers - just background music
+      filterComplex += `[bg]copy[audio_out];`;
     }
   } else {
-    // No background music
+    // No background music - handle voiceovers only
+    let voiceFilters = [];
+    
     if (introVoiceoverIndex !== null && introConfig.enabled) {
-      // FIXED: Use correct audio inputs without background music with volume control
-      // Intro voiceover: trim to intro duration and play from start with volume control
+      // Intro voiceover: trim to intro duration and play from start
       filterComplex += `[${introVoiceoverIndex}:a]volume=0.5,atrim=0:${introEnd}[intro_voice];`;
-      // Main voiceover: delay by intro duration so it starts after intro ends with volume control
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[delayed_main_voice];`;
-      // Combine intro and delayed main voiceover (they won't overlap due to delay)
-      filterComplex += `[intro_voice][delayed_main_voice]amix=inputs=2:duration=longest:dropout_transition=0[audio_out];`;
-    } else if (introConfig.enabled) {
-      // Intro enabled but no intro voiceover - just delay main voiceover to start after intro with volume control
-      const introEnd = introConfig.enabled ? introConfig.duration : 0;
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${introEnd * 1000}|${introEnd * 1000}[audio_out];`;
+      voiceFilters.push('[intro_voice]');
+    }
+    
+    if (mainVoiceoverIndex !== null) {
+      // Main voiceover: delay by intro duration so it starts after intro ends
+      const mainDelay = introEnd * 1000;
+      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5,adelay=${mainDelay}|${mainDelay}[delayed_main_voice];`;
+      voiceFilters.push('[delayed_main_voice]');
+    }
+    
+    if (outroVoiceoverIndex !== null && outroConfig && outroConfig.enabled) {
+      // Outro voiceover: delay by intro + main duration so it starts after main ends
+      const outroDelay = outroStart * 1000;
+      filterComplex += `[${outroVoiceoverIndex}:a]volume=0.5,adelay=${outroDelay}|${outroDelay}[delayed_outro_voice];`;
+      voiceFilters.push('[delayed_outro_voice]');
+    }
+    
+    // Combine all voiceovers
+    if (voiceFilters.length > 1) {
+      filterComplex += `${voiceFilters.join('')}amix=inputs=${voiceFilters.length}:duration=longest:dropout_transition=0[audio_out];`;
+    } else if (voiceFilters.length === 1) {
+      filterComplex += `${voiceFilters[0]}copy[audio_out];`;
     } else {
-      // No intro - main voiceover starts immediately with volume control
-      filterComplex += `[${mainVoiceoverIndex}:a]volume=0.5[audio_out];`;
+      // No audio at all - create silent audio
+      filterComplex += `anullsrc=channel_layout=stereo:sample_rate=44100[audio_out];`;
     }
   }
 
@@ -533,16 +650,27 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
     audioDuration = 30;
   }
 
-  // Create intro configuration if enabled (outro removed per user request)
+  // Create intro/outro configuration with QR code support
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
+  let outroVoiceoverPath = null;
   
   if (enableIntroOutro) {
-    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
+    // Pass Amazon URL for QR code generation
+    const qrOutroOptions = {
+      ...introOutroOptions,
+      enableQROutro: !!options.amazonUrl,
+      amazonUrl: options.amazonUrl,
+      outroDuration: introOutroOptions.outroDuration || 10.0
+    };
+    
+    console.log(`🎯 QR code outro options: enableQROutro=${qrOutroOptions.enableQROutro}, amazonUrl=${qrOutroOptions.amazonUrl ? 'provided' : 'missing'}`);
+    
+    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, qrOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
-    console.log(`🎭 Intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
-    console.log(`⏱️ Total video duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
+    console.log(`🎭 Intro/Outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
+    console.log(`⏱️ Total video duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
     
     // Generate intro voiceover if intro is enabled
     if (introOutroConfig.intro.enabled && introOutroConfig.intro.voiceoverText) {
@@ -572,6 +700,31 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
       } catch (error) {
         console.warn(`⚠️ Failed to generate intro voiceover: ${error.message}`);
         introVoiceoverPath = null;
+      }
+    }
+    
+    // Generate outro voiceover if outro is enabled
+    if (introOutroConfig.outro.enabled && introOutroConfig.outro.voiceoverText) {
+      console.log('🎤 Generating QR code outro voiceover...');
+      const { generateVoiceover } = await import('./voiceover-generator.js');
+      outroVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/outro-voiceover.mp3`);
+      
+      try {
+        // Use the same voice as intro/main for consistency
+        const selectedVoice = options.selectedVoiceId;
+        console.log(`🎤 Using consistent voice for outro: ${selectedVoice}`);
+        
+        await generateVoiceover(
+          introOutroConfig.outro.voiceoverText,
+          outroVoiceoverPath,
+          undefined, // Use default voice settings
+          options.voiceGender, // Pass voice gender for consistency
+          selectedVoice // Pass the specific voice ID to ensure consistency
+        );
+        console.log(`✅ QR code outro voiceover generated: ${outroVoiceoverPath}`);
+      } catch (error) {
+        console.warn(`⚠️ Failed to generate outro voiceover: ${error.message}`);
+        outroVoiceoverPath = null;
       }
     }
   }
@@ -608,6 +761,20 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
       const mainVoiceoverIndex = inputIndex;
       inputIndex++;
       
+      // Add outro voiceover if available
+      let outroVoiceoverIndex = null;
+      if (outroVoiceoverPath) {
+        ffmpegArgs.push('-i', outroVoiceoverPath);
+        outroVoiceoverIndex = inputIndex;
+        inputIndex++;
+      }
+      
+      // Add outro image if outro is enabled
+      if (introOutroConfig.outro.enabled) {
+        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -624,12 +791,14 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
       
       const filterComplex = createIntroOutroFilter({
         introConfig: introOutroConfig.intro,
+        outroConfig: introOutroConfig.outro,
         mainContentConfig: mainContentConfig,
         backgroundMusicPath: backgroundMusicPath,
         totalDuration: totalVideoDuration,
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
-        mainVoiceoverIndex: mainVoiceoverIndex
+        mainVoiceoverIndex: mainVoiceoverIndex,
+        outroVoiceoverIndex: outroVoiceoverIndex
       });
       
       ffmpegArgs.push(
@@ -793,6 +962,8 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
  * @returns {Promise<string>} Path to created video
  */
 export async function createSlideshow(imagePaths, audioPath, outputPath, options = {}) {
+  console.log('🎬 createSlideshow called with options:', JSON.stringify(options, null, 2));
+  
   if (!imagePaths || imagePaths.length === 0) {
     throw new Error('At least one image is required');
   }
@@ -805,6 +976,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
     enableIntroOutro = true,       // Enable intro/outro by default
     introOutroOptions = {}         // Options for intro/outro configuration
   } = options;
+  
+  console.log(`🎬 Slideshow configuration: enableIntroOutro=${enableIntroOutro}, amazonUrl=${options.amazonUrl ? 'provided' : 'missing'}`);
 
   // Convert quality string to numeric CRF value
   let crfValue = 23; // default
@@ -873,9 +1046,20 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
+  let outroVoiceoverPath = null;
   
   if (enableIntroOutro) {
-    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
+    // Pass Amazon URL for QR code generation in slideshow
+    const qrOutroOptions = {
+      ...introOutroOptions,
+      enableQROutro: !!options.amazonUrl,
+      amazonUrl: options.amazonUrl,
+      outroDuration: introOutroOptions.outroDuration || 10.0
+    };
+    
+    console.log(`🎯 Slideshow QR code outro options: enableQROutro=${qrOutroOptions.enableQROutro}, amazonUrl=${qrOutroOptions.amazonUrl ? 'provided' : 'missing'}`);
+    
+    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, qrOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
     console.log(`🎭 Slideshow intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
     console.log(`⏱️ Total slideshow duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
@@ -908,6 +1092,31 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
       } catch (error) {
         console.warn(`⚠️ Failed to generate slideshow intro voiceover: ${error.message}`);
         introVoiceoverPath = null;
+      }
+      
+      // Generate outro voiceover if outro is enabled
+      if (introOutroConfig.outro.enabled && introOutroConfig.outro.voiceoverText) {
+        console.log('🎤 Generating slideshow QR code outro voiceover...');
+        const { generateVoiceover } = await import('./voiceover-generator.js');
+        outroVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/slideshow-outro-voiceover.mp3`);
+        
+        try {
+          // Use the same voice as intro/main for consistency
+          const selectedVoice = options.selectedVoiceId;
+          console.log(`🎤 Using consistent voice for slideshow outro: ${selectedVoice}`);
+          
+          await generateVoiceover(
+            introOutroConfig.outro.voiceoverText,
+            outroVoiceoverPath,
+            undefined, // Use default voice settings
+            options.voiceGender, // Pass voice gender for consistency
+            selectedVoice // Pass the specific voice ID to ensure consistency
+          );
+          console.log(`✅ Slideshow QR code outro voiceover generated: ${outroVoiceoverPath}`);
+        } catch (error) {
+          console.warn(`⚠️ Failed to generate slideshow outro voiceover: ${error.message}`);
+          outroVoiceoverPath = null;
+        }
       }
     }
   }
@@ -952,6 +1161,20 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
       const mainVoiceoverIndex = inputIndex;
       inputIndex++;
       
+      // Add outro voiceover if available
+      let outroVoiceoverIndex = null;
+      if (outroVoiceoverPath) {
+        ffmpegArgs.push('-i', outroVoiceoverPath);
+        outroVoiceoverIndex = inputIndex;
+        inputIndex++;
+      }
+      
+      // Add outro image if outro is enabled
+      if (introOutroConfig.outro.enabled) {
+        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -968,12 +1191,14 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
       
       const filterComplex = createIntroOutroFilter({
         introConfig: introOutroConfig.intro,
+        outroConfig: introOutroConfig.outro, // FIXED: Add outro config
         mainContentConfig: mainContentConfig,
         backgroundMusicPath: backgroundMusicPath,
         totalDuration: totalVideoDuration,
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
-        mainVoiceoverIndex: mainVoiceoverIndex
+        mainVoiceoverIndex: mainVoiceoverIndex,
+        outroVoiceoverIndex: outroVoiceoverIndex // FIXED: Add outro voiceover index
       });
       
       ffmpegArgs.push(
@@ -1336,6 +1561,8 @@ export async function getVideoInfo(videoPath) {
  * @returns {Promise<string>} Path to created short video
  */
 export async function createShortVideo(imagePaths, audioPath, outputPath, options = {}) {
+  console.log('📱 createShortVideo called with options:', JSON.stringify(options, null, 2));
+  
   if (!imagePaths || imagePaths.length === 0) {
     throw new Error('At least one image is required');
   }
@@ -1348,6 +1575,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     enableIntroOutro = true,       // Enable intro/outro by default
     introOutroOptions = {}         // Options for intro/outro configuration
   } = options;
+  
+  console.log(`📱 Short video configuration: enableIntroOutro=${enableIntroOutro}, amazonUrl=${options.amazonUrl ? 'provided' : 'missing'}`);
 
   // Convert quality string to numeric CRF value
   let crfValue = 23; // default
@@ -1414,9 +1643,20 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   let introOutroConfig = null;
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
+  let outroVoiceoverPath = null;
   
   if (enableIntroOutro) {
-    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, introOutroOptions);
+    // Pass Amazon URL for QR code generation in short video
+    const qrOutroOptions = {
+      ...introOutroOptions,
+      enableQROutro: !!options.amazonUrl,
+      amazonUrl: options.amazonUrl,
+      outroDuration: introOutroOptions.outroDuration || 10.0
+    };
+    
+    console.log(`🎯 Short video QR code outro options: enableQROutro=${qrOutroOptions.enableQROutro}, amazonUrl=${qrOutroOptions.amazonUrl ? 'provided' : 'missing'}`);
+    
+    introOutroConfig = await createIntroOutroSegments(backgroundMusicPath, qrOutroOptions);
     totalVideoDuration += introOutroConfig.totalExtraDuration;
     console.log(`🎭 Short video intro segment: intro=${introOutroConfig.intro.enabled} (outro removed)`);
     console.log(`⏱️ Total short video duration: ${totalVideoDuration.toFixed(2)}s (including intro)`);
@@ -1449,6 +1689,31 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       } catch (error) {
         console.warn(`⚠️ Failed to generate short video intro voiceover: ${error.message}`);
         introVoiceoverPath = null;
+      }
+      
+      // Generate outro voiceover if outro is enabled
+      if (introOutroConfig.outro.enabled && introOutroConfig.outro.voiceoverText) {
+        console.log('🎤 Generating short video QR code outro voiceover...');
+        const { generateVoiceover } = await import('./voiceover-generator.js');
+        outroVoiceoverPath = path.resolve(`${path.dirname(outputPath)}/short-outro-voiceover.mp3`);
+        
+        try {
+          // Use the same voice as intro/main for consistency
+          const selectedVoice = options.selectedVoiceId;
+          console.log(`🎤 Using consistent voice for short video outro: ${selectedVoice}`);
+          
+          await generateVoiceover(
+            introOutroConfig.outro.voiceoverText,
+            outroVoiceoverPath,
+            undefined, // Use default voice settings
+            options.voiceGender, // Pass voice gender for consistency
+            selectedVoice // Pass the specific voice ID to ensure consistency
+          );
+          console.log(`✅ Short video QR code outro voiceover generated: ${outroVoiceoverPath}`);
+        } catch (error) {
+          console.warn(`⚠️ Failed to generate short video outro voiceover: ${error.message}`);
+          outroVoiceoverPath = null;
+        }
       }
     }
   }
@@ -1496,6 +1761,20 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       const mainVoiceoverIndex = inputIndex;
       inputIndex++;
       
+      // Add outro voiceover if available
+      let outroVoiceoverIndex = null;
+      if (outroVoiceoverPath) {
+        ffmpegArgs.push('-i', outroVoiceoverPath);
+        outroVoiceoverIndex = inputIndex;
+        inputIndex++;
+      }
+      
+      // Add outro image if outro is enabled
+      if (introOutroConfig.outro.enabled) {
+        ffmpegArgs.push('-loop', '1', '-t', introOutroConfig.outro.duration.toString(), '-i', introOutroConfig.outro.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -1512,12 +1791,14 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
       
       const filterComplex = createIntroOutroFilter({
         introConfig: introOutroConfig.intro,
+        outroConfig: introOutroConfig.outro, // FIXED: Add outro config
         mainContentConfig: mainContentConfig,
         backgroundMusicPath: backgroundMusicPath,
         totalDuration: totalVideoDuration,
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
-        mainVoiceoverIndex: mainVoiceoverIndex
+        mainVoiceoverIndex: mainVoiceoverIndex,
+        outroVoiceoverIndex: outroVoiceoverIndex // FIXED: Add outro voiceover index
       });
       
       ffmpegArgs.push(
