@@ -70,6 +70,16 @@ const FLAG_DEFINITIONS = {
     default: false,
     description: 'Disable short video creation'
   },
+  'publish-both-videos': {
+    type: 'boolean',
+    default: true,
+    description: 'Publish both long and short videos to YouTube'
+  },
+  'no-dual-publish': {
+    type: 'boolean',
+    default: false,
+    description: 'Disable dual publishing (upload only long video)'
+  },
   'headless': {
     type: 'boolean',
     default: false,
@@ -113,6 +123,8 @@ Options:
   --promotion-platforms <list> Comma-separated platforms (reddit,pinterest,twitter)
   --create-short-video       Create a 30-second short video for social media (default: true)
   --no-short-video           Disable short video creation
+  --publish-both-videos      Publish both long and short videos to YouTube (default: true)
+  --no-dual-publish          Disable dual publishing (upload only long video)
   --headless                 Run browser automation in headless mode
   --male                     Use male voice for voiceover generation
   --female                   Use female voice for voiceover generation
@@ -159,6 +171,11 @@ const validateCreateArgs = (args, options) => {
     options['create-short-video'] = false;
   }
 
+  // Handle conflicting dual publishing options
+  if (options['no-dual-publish']) {
+    options['publish-both-videos'] = false;
+  }
+
   // Handle conflicting voice options
   if (options.male && options.female) {
     exitWithError('Cannot specify both --male and --female voice options. Choose one or neither for random selection.');
@@ -189,6 +206,7 @@ const convertToVideoOptions = (cliOptions) => {
     autoPromote: cliOptions['auto-promote'],
     promotionPlatforms: cliOptions['promotion-platforms'],
     createShortVideo: cliOptions['create-short-video'],
+    publishBothVideos: cliOptions['publish-both-videos'],
     headless: cliOptions.headless,
     voiceGender: voiceGender,
     onProgress: createProgressCallback()

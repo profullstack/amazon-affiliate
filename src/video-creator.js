@@ -1405,15 +1405,10 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   console.log(`📹 Output: ${absoluteOutputPath}`);
   console.log(`📐 Resolution: ${resolution} (vertical format for mobile)`);
 
-  // Select background music if enabled
+  // DISABLE background music for short videos to prevent buzzing noise
   let backgroundMusicPath = null;
   let backgroundMusicConfig = null;
-  if (enableBackgroundMusic) {
-    backgroundMusicPath = await selectRandomBackgroundMusic();
-    if (backgroundMusicPath) {
-      console.log(`🎼 Short video background music: ${path.basename(backgroundMusicPath)}`);
-    }
-  }
+  console.log('🔇 Background music disabled for short videos to prevent audio buzzing');
 
   // Create intro configuration if enabled (outro removed per user request)
   let introOutroConfig = null;

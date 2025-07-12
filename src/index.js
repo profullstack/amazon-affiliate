@@ -305,16 +305,11 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     const sessionId = generateSessionId();
     console.log(`🔑 Session ID: ${sessionId}`);
 
-    // Create unique file paths for this session
+    // Create unique file paths for this session (will be updated with meaningful name later)
     const voiceoverPaths = createVoiceoverFilePaths(config.tempDir, {
       includeMain: true,
       includeShort: config.createShortVideo,
       includeIntro: config.enableIntroOutro
-    }, sessionId);
-
-    const outputPaths = createOutputFilePaths(config.outputDir, 'affiliate-video', {
-      includeShort: config.createShortVideo,
-      includeThumbnails: true
     }, sessionId);
 
     // Ensure directories exist
@@ -391,6 +386,12 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
     console.log(`✅ AI video title generated: "${videoTitle}"`);
     
     const safeFilename = generateSafeFilename(videoTitle);
+
+    // Create output file paths with meaningful filename
+    const outputPaths = createOutputFilePaths(config.outputDir, safeFilename, {
+      includeShort: config.createShortVideo,
+      includeThumbnails: true
+    }, sessionId);
 
     // Step 6: Create video
     reportProgress(config.onProgress, 'videoCreation', 70, 'Creating slideshow video');
@@ -559,7 +560,7 @@ export const createAffiliateVideo = async (productInput, options = {}) => {
         try {
           // Import sharp for image conversion
           const sharp = (await import('sharp')).default;
-          promotionThumbnailPath = `${config.outputDir}/${safeFilename}.png`;
+          promotionThumbnailPath = `${config.outputDir}/${safeFilename}-${sessionId}.png`;
           
           await sharp(finalThumbnailPath)
             .png()
