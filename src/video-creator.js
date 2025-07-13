@@ -22,12 +22,21 @@ const selectRandomBackgroundMusic = async () => {
   try {
     const mediaFiles = await glob('./src/media/*.wav');
     
-    if (mediaFiles.length === 0) {
-      console.log('📵 No background music files found in ./src/media/*.wav');
+    // Filter out beep files and other non-music files
+    const musicFiles = mediaFiles.filter(file => {
+      const filename = path.basename(file).toLowerCase();
+      return !filename.includes('beep') &&
+             !filename.includes('test') &&
+             !filename.includes('short') &&
+             !filename.startsWith('temp');
+    });
+    
+    if (musicFiles.length === 0) {
+      console.log('📵 No background music files found in ./src/media/*.wav (excluding beep/test files)');
       return null;
     }
     
-    const selectedFile = mediaFiles[Math.floor(Math.random() * mediaFiles.length)];
+    const selectedFile = musicFiles[Math.floor(Math.random() * musicFiles.length)];
     console.log(`🎵 Selected background music: ${path.basename(selectedFile)}`);
     return selectedFile;
   } catch (error) {
@@ -327,7 +336,16 @@ export const createIntroOutroFilter = (config) => {
   // Handle small QR code overlay if provided
   if (smallQRConfig && smallQRConfig.enabled && smallQRConfig.imagePath) {
     // Calculate the QR input index - it should be after all other inputs
-    smallQRInputIndex = inputIndex;
+    // Input order: intro image (0) + main images (1 to N) + intro voiceover + main voiceover + outro voiceover + outro image + small QR + background music
+    let qrInputIndex = mainContentStart + mainContentConfig.imageCount; // After main images
+    
+    // Skip voiceover inputs to get to the small QR image
+    if (introVoiceoverIndex !== null) qrInputIndex++; // Skip intro voiceover
+    if (mainVoiceoverIndex !== null) qrInputIndex++; // Skip main voiceover
+    if (outroVoiceoverIndex !== null) qrInputIndex++; // Skip outro voiceover
+    if (outroConfig && outroConfig.enabled) qrInputIndex++; // Skip outro image
+    
+    smallQRInputIndex = qrInputIndex;
     console.log(`📱 Small QR code overlay input index: ${smallQRInputIndex}`);
     
     // Scale the small QR code to appropriate size
@@ -375,10 +393,11 @@ export const createIntroOutroFilter = (config) => {
 
   // Audio processing: intro voiceover + main voiceover + outro voiceover + background music
   // mainVoiceoverIndex is now passed as a parameter
-  // Calculate music index: it should be the last input (after outro image if present)
+  // Calculate music index: it should be the last input (after outro image and small QR if present)
   let musicIndex = mainVoiceoverIndex + 1; // Start after main voiceover
   if (outroVoiceoverIndex !== null) musicIndex = outroVoiceoverIndex + 1; // After outro voiceover if present
   if (outroConfig && outroConfig.enabled) musicIndex++; // After outro image if present
+  if (smallQRConfig && smallQRConfig.enabled) musicIndex++; // After small QR image if present
   
   // Calculate timing variables that are used in both branches
   const introEnd = introConfig.enabled ? introConfig.duration : 0;
