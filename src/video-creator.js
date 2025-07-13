@@ -220,7 +220,25 @@ const checkFileExists = async (filePath) => {
 };
 
 /**
- * Creates complex FFmpeg filter for intro, main content, and QR code outro
+ * Creates a small QR code overlay filter for the lower left corner
+ * @param {string} qrCodeImagePath - Path to the QR code image
+ * @param {Object} options - Overlay options
+ * @returns {string} FFmpeg overlay filter string
+ */
+const createSmallQROverlay = (qrCodeImagePath, options = {}) => {
+  const {
+    size = 80,           // Small size for corner overlay
+    x = 20,              // 20px from left edge
+    y = 'H-h-20',        // 20px from bottom edge
+    opacity = 0.8        // Slightly transparent
+  } = options;
+  
+  // Create overlay filter for small QR code in lower left corner
+  return `overlay=${x}:${y}:enable='between(t,0,${options.endTime || 'inf'})':alpha=${opacity}`;
+};
+
+/**
+ * Creates complex FFmpeg filter for intro, main content, and QR code outro with optional small QR overlay
  * @param {Object} config - Configuration object
  * @returns {string} FFmpeg filter complex string
  */
@@ -234,13 +252,15 @@ export const createIntroOutroFilter = (config) => {
     resolution,
     introVoiceoverIndex = null,  // New parameter for intro voiceover audio
     mainVoiceoverIndex = null,   // New parameter for main voiceover audio
-    outroVoiceoverIndex = null   // New parameter for outro voiceover audio
+    outroVoiceoverIndex = null,  // New parameter for outro voiceover audio
+    smallQRConfig = null         // New parameter for small QR code overlay
   } = config;
 
   const [width, height] = resolution.split('x').map(Number);
   let filterComplex = '';
   let inputIndex = 0;
   let segmentFilters = [];
+  let smallQRInputIndex = null;
 
   // Intro segment - scale appropriately for aspect ratio
   if (introConfig.enabled) {
@@ -304,15 +324,53 @@ export const createIntroOutroFilter = (config) => {
     segmentFilters.push('[outro_v]');
   }
 
+  // Handle small QR code overlay if provided
+  if (smallQRConfig && smallQRConfig.enabled && smallQRConfig.imagePath) {
+    // Calculate the QR input index - it should be after all other inputs
+    smallQRInputIndex = inputIndex;
+    console.log(`📱 Small QR code overlay input index: ${smallQRInputIndex}`);
+    
+    // Scale the small QR code to appropriate size
+    filterComplex += `[${smallQRInputIndex}:v]scale=${smallQRConfig.size || 80}:${smallQRConfig.size || 80}[small_qr];`;
+  }
+
   // Concatenate video segments (intro + main content + outro)
+  let videoStreamName = '[final_v]';
   if (segmentFilters.length > 1) {
-    filterComplex += `${segmentFilters.join('')}concat=n=${segmentFilters.length}:v=1:a=0[final_v];`;
+    filterComplex += `${segmentFilters.join('')}concat=n=${segmentFilters.length}:v=1:a=0[concat_v];`;
+    videoStreamName = '[concat_v]';
   } else if (segmentFilters.length === 1) {
-    // Single segment - just copy it to final output
-    filterComplex += `${segmentFilters[0]}copy[final_v];`;
+    // Single segment - use it directly
+    videoStreamName = segmentFilters[0];
   } else {
     // Fallback - should not happen, but handle gracefully
     throw new Error('No video segments available for concatenation');
+  }
+
+  // Apply small QR code overlay if enabled (but not during outro)
+  if (smallQRConfig && smallQRConfig.enabled && smallQRConfig.imagePath) {
+    const introEnd = introConfig.enabled ? introConfig.duration : 0;
+    const mainEnd = introEnd + mainContentConfig.duration;
+    
+    // Only show QR overlay during intro and main content, not outro
+    const overlayEndTime = outroConfig && outroConfig.enabled ? mainEnd : totalDuration;
+    
+    console.log(`📱 Small QR overlay timing: 0s - ${overlayEndTime}s (excluding outro)`);
+    
+    const overlayFilter = createSmallQROverlay(smallQRConfig.imagePath, {
+      size: smallQRConfig.size || 80,
+      x: smallQRConfig.x || 20,
+      y: smallQRConfig.y || 'H-h-20',
+      opacity: smallQRConfig.opacity || 0.8,
+      endTime: overlayEndTime
+    });
+    
+    filterComplex += `${videoStreamName}[small_qr]${overlayFilter}[final_v];`;
+  } else {
+    // No QR overlay - just copy the video stream
+    if (videoStreamName !== '[final_v]') {
+      filterComplex += `${videoStreamName}copy[final_v];`;
+    }
   }
 
   // Audio processing: intro voiceover + main voiceover + outro voiceover + background music
@@ -664,6 +722,7 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
   let outroVoiceoverPath = null;
+  let smallQRConfig = null;
   
   if (enableIntroOutro) {
     // Pass Amazon URL for QR code generation
@@ -680,7 +739,39 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
     totalVideoDuration += introOutroConfig.totalExtraDuration;
     console.log(`🎭 Intro/Outro segments: intro=${introOutroConfig.intro.enabled}, outro=${introOutroConfig.outro.enabled}`);
     console.log(`⏱️ Total video duration: ${totalVideoDuration.toFixed(2)}s (including intro/outro)`);
-    
+  }
+
+  // Generate small QR code for corner overlay if Amazon URL is provided
+  if (options.amazonUrl && options.enableSmallQROverlay !== false) {
+    try {
+      console.log('📱 Generating small QR code for corner overlay...');
+      const { generateQRCode } = await import('./utils/qr-code-generator.js');
+      
+      const tempDir = './temp';
+      await fs.mkdir(tempDir, { recursive: true });
+      const smallQRPath = path.resolve(`${tempDir}/small-qr-code-${Date.now()}.png`);
+      
+      // Generate smaller QR code for overlay
+      await generateQRCode(options.amazonUrl, smallQRPath, { size: 150 });
+      
+      smallQRConfig = {
+        enabled: true,
+        imagePath: smallQRPath,
+        size: 80,
+        x: 20,
+        y: 'H-h-20',
+        opacity: 0.8
+      };
+      
+      console.log(`✅ Small QR code generated for overlay: ${smallQRPath}`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to generate small QR code overlay: ${error.message}`);
+      smallQRConfig = null;
+    }
+  }
+
+  // Generate intro and outro voiceovers if intro/outro is enabled
+  if (enableIntroOutro && introOutroConfig) {
     // Generate intro voiceover if intro is enabled
     if (introOutroConfig.intro.enabled && introOutroConfig.intro.voiceoverText) {
       console.log('🎤 Generating intro voiceover...');
@@ -784,6 +875,12 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         inputIndex++;
       }
       
+      // Add small QR code image if enabled
+      if (smallQRConfig && smallQRConfig.enabled) {
+        ffmpegArgs.push('-i', smallQRConfig.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -807,7 +904,8 @@ export async function createVideo(imagePath, audioPath, outputPath, options = {}
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
         mainVoiceoverIndex: mainVoiceoverIndex,
-        outroVoiceoverIndex: outroVoiceoverIndex
+        outroVoiceoverIndex: outroVoiceoverIndex,
+        smallQRConfig: smallQRConfig
       });
       
       ffmpegArgs.push(
@@ -1056,6 +1154,7 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
   let outroVoiceoverPath = null;
+  let smallQRConfig = null;
   
   if (enableIntroOutro) {
     // Pass Amazon URL for QR code generation in slideshow
@@ -1130,6 +1229,35 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
     }
   }
 
+  // Generate small QR code for corner overlay if Amazon URL is provided
+  if (options.amazonUrl && options.enableSmallQROverlay !== false) {
+    try {
+      console.log('📱 Generating small QR code for slideshow corner overlay...');
+      const { generateQRCode } = await import('./utils/qr-code-generator.js');
+      
+      const tempDir = './temp';
+      await fs.mkdir(tempDir, { recursive: true });
+      const smallQRPath = path.resolve(`${tempDir}/slideshow-small-qr-code-${Date.now()}.png`);
+      
+      // Generate smaller QR code for overlay
+      await generateQRCode(options.amazonUrl, smallQRPath, { size: 150 });
+      
+      smallQRConfig = {
+        enabled: true,
+        imagePath: smallQRPath,
+        size: 80,
+        x: 20,
+        y: 'H-h-20',
+        opacity: 0.8
+      };
+      
+      console.log(`✅ Small QR code generated for slideshow overlay: ${smallQRPath}`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to generate small QR code overlay for slideshow: ${error.message}`);
+      smallQRConfig = null;
+    }
+  }
+
   // Calculate duration per image
   const durationPerImage = audioDuration / imagePaths.length;
   console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
@@ -1184,6 +1312,12 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         inputIndex++;
       }
       
+      // Add small QR code image if enabled
+      if (smallQRConfig && smallQRConfig.enabled) {
+        ffmpegArgs.push('-i', smallQRConfig.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -1207,7 +1341,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
         mainVoiceoverIndex: mainVoiceoverIndex,
-        outroVoiceoverIndex: outroVoiceoverIndex // FIXED: Add outro voiceover index
+        outroVoiceoverIndex: outroVoiceoverIndex, // FIXED: Add outro voiceover index
+        smallQRConfig: smallQRConfig
       });
       
       ffmpegArgs.push(
@@ -1653,6 +1788,7 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
   let totalVideoDuration = audioDuration;
   let introVoiceoverPath = null;
   let outroVoiceoverPath = null;
+  let smallQRConfig = null;
   
   if (enableIntroOutro) {
     // Pass Amazon URL for QR code generation in short video
@@ -1727,6 +1863,35 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
     }
   }
 
+  // Generate small QR code for corner overlay if Amazon URL is provided
+  if (options.amazonUrl && options.enableSmallQROverlay !== false) {
+    try {
+      console.log('📱 Generating small QR code for short video corner overlay...');
+      const { generateQRCode } = await import('./utils/qr-code-generator.js');
+      
+      const tempDir = './temp';
+      await fs.mkdir(tempDir, { recursive: true });
+      const smallQRPath = path.resolve(`${tempDir}/short-small-qr-code-${Date.now()}.png`);
+      
+      // Generate smaller QR code for overlay
+      await generateQRCode(options.amazonUrl, smallQRPath, { size: 150 });
+      
+      smallQRConfig = {
+        enabled: true,
+        imagePath: smallQRPath,
+        size: 80,
+        x: 20,
+        y: 'H-h-20',
+        opacity: 0.8
+      };
+      
+      console.log(`✅ Small QR code generated for short video overlay: ${smallQRPath}`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to generate small QR code overlay for short video: ${error.message}`);
+      smallQRConfig = null;
+    }
+  }
+
   // Calculate duration per image for the short video
   const durationPerImage = audioDuration / imagePaths.length;
   console.log(`⏱️ Duration per image: ${durationPerImage.toFixed(2)}s`);
@@ -1784,6 +1949,12 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         inputIndex++;
       }
       
+      // Add small QR code image if enabled
+      if (smallQRConfig && smallQRConfig.enabled) {
+        ffmpegArgs.push('-i', smallQRConfig.imagePath);
+        inputIndex++;
+      }
+      
       // Add background music
       if (backgroundMusicPath) {
         ffmpegArgs.push('-i', backgroundMusicPath);
@@ -1807,7 +1978,8 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         resolution: resolution,
         introVoiceoverIndex: introVoiceoverIndex,
         mainVoiceoverIndex: mainVoiceoverIndex,
-        outroVoiceoverIndex: outroVoiceoverIndex // FIXED: Add outro voiceover index
+        outroVoiceoverIndex: outroVoiceoverIndex, // FIXED: Add outro voiceover index
+        smallQRConfig: smallQRConfig
       });
       
       ffmpegArgs.push(
