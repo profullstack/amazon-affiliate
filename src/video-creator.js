@@ -86,8 +86,8 @@ const createBackgroundMusicFilter = (backgroundMusicPath, videoDuration, options
   const audioFilter = [
     // Background music processing: loop, fade in/out, volume control
     `[1:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${safeFadeIn},afade=t=out:st=${fadeOutStart}:d=${safeFadeOut},volume=${safeBackgroundVolume}[bg];`,
-    // Voiceover processing: ensure consistent volume with 80% for better audio levels
-    `[0:a]volume=${safeVoiceVolume * 0.8}[voice];`,
+    // Voiceover processing: use full volume for clear narration
+    `[0:a]volume=${safeVoiceVolume}[voice];`,
     // Mix both audio streams
     `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out]`
   ].join('');
@@ -453,8 +453,8 @@ export const createIntroOutroFilter = (config) => {
     // Handle multiple voiceovers with proper timing
     let voiceFilters = [];
     
-    // Use consistent normalized volume for all voiceovers - increased for better audio levels
-    const safeVoiceVolume = normalizeVolume(0.8, 'voice'); // Increased from 0.5 to 0.8 (80%)
+    // Use consistent normalized volume for all voiceovers - full volume for clear narration
+    const safeVoiceVolume = normalizeVolume(1.0, 'voice'); // Full volume (100%) for clear narration
     
     if (introVoiceoverIndex !== null && introConfig.enabled) {
       // Intro voiceover: trim to intro duration and play from start
@@ -491,8 +491,8 @@ export const createIntroOutroFilter = (config) => {
     // No background music - handle voiceovers only
     let voiceFilters = [];
     
-    // Use consistent normalized volume for all voiceovers - increased for better audio levels
-    const safeVoiceVolume = normalizeVolume(0.8, 'voice'); // Increased from 0.5 to 0.8 (80%)
+    // Use consistent normalized volume for all voiceovers - full volume for clear narration
+    const safeVoiceVolume = normalizeVolume(1.0, 'voice'); // Full volume (100%) for clear narration
     
     if (introVoiceoverIndex !== null && introConfig.enabled) {
       // Intro voiceover: trim to intro duration and play from start
@@ -1443,8 +1443,8 @@ export async function createSlideshow(imagePaths, audioPath, outputPath, options
         const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
-        // Update the filter complex to include background music mixing with volume control
-        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume * 0.8}[voice];`;
+        // Update the filter complex to include background music mixing with full voice volume
+        filterComplex += `[${audioInputIndex}:a]volume=${backgroundMusicConfig.settings.voiceoverVolume}[voice];`;
         filterComplex += `[${musicInputIndex}:a]aloop=loop=-1:size=2e+09,afade=t=in:st=0:d=${backgroundMusicConfig.settings.fadeInDuration},afade=t=out:st=${Math.max(0, audioDuration - backgroundMusicConfig.settings.fadeOutDuration)}:d=${backgroundMusicConfig.settings.fadeOutDuration},volume=${backgroundMusicConfig.settings.backgroundVolume}[bg];`;
         filterComplex += `[voice][bg]amix=inputs=2:duration=first:dropout_transition=2[audio_out];`;
         
@@ -2148,9 +2148,9 @@ export async function createShortVideo(imagePaths, audioPath, outputPath, option
         const audioInputIndex = absoluteImagePaths.length; // Voiceover audio index
         const musicInputIndex = absoluteImagePaths.length + 1; // Background music index
         
-        // FIXED: Use safer audio mixing for short videos to prevent beep noise
-        // Apply additional volume reduction and safer mixing parameters
-        const safeVoiceVolume = Math.min(backgroundMusicConfig.settings.voiceoverVolume * 0.3, 0.7); // Further reduced
+        // Use proper audio mixing for short videos with clear narration
+        // Keep voice volume high for clarity while reducing background music
+        const safeVoiceVolume = Math.min(backgroundMusicConfig.settings.voiceoverVolume, 1.0); // Full voice volume
         const safeBackgroundVolume = Math.min(backgroundMusicConfig.settings.backgroundVolume * 0.5, 0.1); // Much lower background
         
         filterComplex += `[${audioInputIndex}:a]volume=${safeVoiceVolume},alimiter=level_in=1:level_out=0.8:limit=0.8[voice];`;
